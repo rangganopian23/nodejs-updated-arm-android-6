@@ -120,6 +120,9 @@ jobs:
           export CXXFLAGS="-Os -fdata-sections -ffunction-sections -std=gnu++20 -pipe -g0 -static $BYPASS_FLAGS"
           export LDFLAGS="-static -Wl,--export-dynamic -Wl,--gc-sections"
           
+          export CFLAGS_host="-w -include $GITHUB_WORKSPACE/bypass_assert.h"
+          export CXXFLAGS_host="-w -include $GITHUB_WORKSPACE/bypass_assert.h"
+          
           ./configure \
             --dest-cpu=$TARGET_ARCH \
             --dest-os=linux \
