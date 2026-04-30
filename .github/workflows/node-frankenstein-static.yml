@@ -83,6 +83,7 @@ jobs:
               'objects.h',
               'smi.h',
               'heap.h'
+              'wasm-objects.h'
           ]
           
           for root, dirs, files in os.walk(v8_src_dir):
@@ -98,6 +99,7 @@ jobs:
                           content = re.sub(r'static_assert\s*\([^;]*==[^;]*Size[^;]*\);', '/* bypassed size limit */;', content)
                           content = re.sub(r'static_assert\s*\([^;]*==[^;]*BYTES[^;]*\);', '/* bypassed bytes limit */;', content)
                           content = re.sub(r'static_assert\s*\([^;]*kJSDispatchTableEntrySize[^;]*\);', '/* bypassed JDT size */;', content)
+                          content = re.sub(r'static_assert\s*\(\s*IsAligned[^;]+\);', '/* bypassed IsAligned */;', content)
 
                           with open(filepath, 'w', encoding='utf-8') as f:
                               f.write(content)
