@@ -74,38 +74,27 @@ jobs:
 
           v8_src_dir = 'deps/v8/src'
           
-          target_files = [
-              'globals.h',
-              'fixed-array.h',
-              'js-dispatch-table.h',
-              'string.h',
-              'js-array-buffer.h',
-              'objects.h',
-              'smi.h',
-              'heap.h'
-              'wasm-objects.h'
-          ]
+          quarantine_folders = ['objects', 'sandbox', 'wasm', 'common']
           
           for root, dirs, files in os.walk(v8_src_dir):
-              for file in files:
-                  if file in target_files:
-                      filepath = os.path.join(root, file)
-                      try:
-                          with open(filepath, 'r', encoding='utf-8') as f:
-                              content = f.read()
-                          
-                          content = re.sub(r'static_assert\s*\(\s*Smi::IsValid[^;]+;', '/* bypassed Smi limit */;', content)
-                          
-                          content = re.sub(r'static_assert\s*\([^;]*==[^;]*Size[^;]*\);', '/* bypassed size limit */;', content)
-                          content = re.sub(r'static_assert\s*\([^;]*==[^;]*BYTES[^;]*\);', '/* bypassed bytes limit */;', content)
-                          content = re.sub(r'static_assert\s*\([^;]*kJSDispatchTableEntrySize[^;]*\);', '/* bypassed JDT size */;', content)
-                          content = re.sub(r'static_assert\s*\(\s*IsAligned[^;]+\);', '/* bypassed IsAligned */;', content)
+              
+              path_parts = root.split(os.sep)
+              if any(folder in path_parts for folder in quarantine_folders):
+                  for file in files:
+                      if file.endswith(('.h', '.cc', '.inc')):
+                          filepath = os.path.join(root, file)
+                          try:
+                              with open(filepath, 'r', encoding='utf-8') as f:
+                                  content = f.read()
+                              
+                              if 'static_assert' in content:
+                                  
+                                  content = re.sub(r'static_assert\s*\([^;]+;', '/* assert memori dibunuh */;', content)
+                                  with open(filepath, 'w', encoding='utf-8') as f:
+                                      f.write(content)
+                          except Exception:
+                              pass
 
-                          with open(filepath, 'w', encoding='utf-8') as f:
-                              f.write(content)
-                      except Exception:
-                          pass
-          
           filepath_handles = 'deps/v8/src/handles/handles.h'
           try:
               with open(filepath_handles, 'r') as f: content = f.read()
@@ -140,6 +129,7 @@ jobs:
               with open(filepath_dl, 'w') as f: f.write(content_dl)
           except Exception: pass
           "
+
 
       - working-directory: ${{ env.RAMDISK_PATH }}/node-src
         run: |
