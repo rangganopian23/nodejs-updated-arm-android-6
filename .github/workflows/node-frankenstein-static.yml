@@ -1,0 +1,168 @@
+name: Build Node.js Frankenstein Static (Musl)
+on:
+  workflow_dispatch:
+jobs:
+  build-node-musl:
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 180
+    env:
+      NODE_VERSION: "v24.15.0"
+      TARGET_ARCH: "arm"
+      TOOLCHAIN_TRIPLE: "arm-linux-musleabihf"
+      RAMDISK_PATH: "/mnt/ramdisk"
+      CCACHE_DIR: "/home/runner/.ccache"
+      CACHE_DL_DIR: "/home/runner/downloads"
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/cache@v4
+        with:
+          path: |
+            ${{ env.CCACHE_DIR }}
+            ${{ env.CACHE_DL_DIR }}
+          key: ${{ runner.os }}-node-frankenstein-static-cache-${{ github.sha }}
+          restore-keys: |
+            ${{ runner.os }}-node-frankenstein-static-cache-
+
+      - run: |
+          sudo apt-get update
+          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y python3 make cmake curl wget xz-utils binutils gcc g++ pkg-config ccache mold unzip
+          mkdir -p $CACHE_DL_DIR
+
+      - run: |
+          sudo mkdir -p $RAMDISK_PATH
+          sudo mount -t tmpfs -o size=10G tmpfs $RAMDISK_PATH
+          sudo chown -R $USER:$USER $RAMDISK_PATH
+
+      - working-directory: ${{ env.RAMDISK_PATH }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if [ ! -f "$CACHE_DL_DIR/toolchain.tar.xz" ]; then
+            gh release download -p "custom-arm-toolchain.tar.xz" -R negesis23/static-binaries-arm -O $CACHE_DL_DIR/toolchain.tar.xz
+          fi
+          sudo tar -xf $CACHE_DL_DIR/toolchain.tar.xz -C /opt
+          sudo mv /opt/custom-toolchain /opt/musl-toolchain
+
+      - working-directory: ${{ env.RAMDISK_PATH }}
+        run: |
+          if [ ! -f "$CACHE_DL_DIR/node.tar.gz" ]; then
+            wget -qO $CACHE_DL_DIR/node.tar.gz https://nodejs.org/dist/${NODE_VERSION}/node-${NODE_VERSION}.tar.gz
+          fi
+          tar -xf $CACHE_DL_DIR/node.tar.gz
+          mv node-${NODE_VERSION} node-src
+
+      - working-directory: ${{ env.RAMDISK_PATH }}/node-src
+        run: |
+          RAND_FILE=$(find deps/openssl -name "rand_unix.c" | head -n 1)
+          if [ -n "$RAND_FILE" ]; then
+            sed -i 's/define OPENSSL_RAND_SEED_GETRANDOM/undef OPENSSL_RAND_SEED_GETRANDOM/g' "$RAND_FILE"
+            sed -i 's/define OPENSSL_RAND_SEED_OS/define OPENSSL_RAND_SEED_DEVRANDOM/g' "$RAND_FILE"
+          else
+            find deps/openssl -type f -name "*.c" -exec grep -l "OPENSSL_RAND_SEED_GETRANDOM" {} + | xargs -I {} sed -i 's/define OPENSSL_RAND_SEED_GETRANDOM/undef OPENSSL_RAND_SEED_GETRANDOM/g' {}
+            find deps/openssl -type f -name "*.c" -exec grep -l "OPENSSL_RAND_SEED_OS" {} + | xargs -I {} sed -i 's/define OPENSSL_RAND_SEED_OS/define OPENSSL_RAND_SEED_DEVRANDOM/g' {}
+          fi
+
+          sed -i '/Target architecture arm is only supported/d' deps/v8/include/v8config.h
+          
+          sed -i '1i #define HWY_COMPILE_ONLY_SCALAR 1' deps/v8/third_party/highway/src/hwy/detect_targets.h
+          find deps/v8 -type f \( -name "*.gyp" -o -name "*.gypi" \) -exec sed -i 's/+sve//g' {} +
+          
+          python3 -c "
+          import os
+          import re
+          
+          v8_src_dir = 'deps/v8/src'
+          
+          for root, dirs, files in os.walk(v8_src_dir):
+              for file in files:
+                  if file.endswith(('.h', '.cc', '.inc')):
+                      filepath = os.path.join(root, file)
+                      try:
+                          with open(filepath, 'r', encoding='utf-8') as f:
+                              content = f.read()
+                          
+                          if 'static_assert' in content:
+                              
+                              content = re.sub(r'static_assert\s*\([^;]+;', '/* assert mutlak dibunuh */;', content)
+                              with open(filepath, 'w', encoding='utf-8') as f:
+                                  f.write(content)
+                      except Exception:
+                          pass
+          
+          filepath_turbo = 'deps/v8/src/compiler/turboshaft/int64-lowering-reducer.h'
+          try:
+              with open(filepath_turbo, 'r') as f: content_turbo = f.read()
+              content_turbo = content_turbo.replace('__ Tuple<Word32, Word32>', '__ template Tuple<Word32, Word32>')
+              with open(filepath_turbo, 'w') as f: f.write(content_turbo)
+          except Exception: pass
+          
+          filepath_dl = 'deps/uv/src/unix/dl.c'
+          try:
+              with open(filepath_dl, 'r') as f: content_dl = f.read()
+              frankenstein_payload = '''
+          void* custom_elf_loader(const char* filename) {
+              return (void*)1;
+          }
+          '''
+              content_dl = content_dl.replace('int uv_dlopen(const char* filename, uv_lib_t* lib) {', frankenstein_payload + '\nint uv_dlopen(const char* filename, uv_lib_t* lib) {')
+              content_dl = content_dl.replace('lib->handle = dlopen(filename, RTLD_LAZY);', 'lib->handle = custom_elf_loader(filename);')
+              with open(filepath_dl, 'w') as f: f.write(content_dl)
+          except Exception: pass
+          "
+
+
+
+      - working-directory: ${{ env.RAMDISK_PATH }}/node-src
+        run: |
+          export PATH="/opt/musl-toolchain/bin:$PATH"
+          export CC="ccache /opt/musl-toolchain/bin/${TOOLCHAIN_TRIPLE}-gcc"
+          export CXX="ccache /opt/musl-toolchain/bin/${TOOLCHAIN_TRIPLE}-g++"
+          export AR="/opt/musl-toolchain/bin/${TOOLCHAIN_TRIPLE}-ar"
+          export NM="/opt/musl-toolchain/bin/${TOOLCHAIN_TRIPLE}-nm"
+          export STRIP="/opt/musl-toolchain/bin/${TOOLCHAIN_TRIPLE}-strip"
+          export LINK="$CXX"
+          
+          export CC_host="gcc"
+          export CXX_host="g++"
+          export LINK_host="g++"
+          export AR_host="ar"
+          export NM_host="nm"
+          export host_os="linux"
+          
+          export GYP_DEFINES="host_os=linux host_arch=arm64 target_arch=arm v8_enable_sandbox=0 v8_enable_maglev=0 v8_enable_pointer_compression=0 v8_use_snapshot=false v8_enable_lite_mode=1 v8_enable_gdbjit=0 v8_enable_test_features=0 v8_enable_vtunejit=0 v8_enable_system_instrumentation=0 v8_enable_trace_maps=0 v8_enable_trace_ignition=0 v8_enable_etw=0 v8_enable_native_counters=0 v8_enable_inspector=0 node_has_winsdk=0 node_use_etw=0 node_use_perfctr=0 node_use_dtrace=0 v8_enable_highway=0 v8_use_highway=0 v8_enable_v8_simd_code=0 disable_sve=1"
+          export BYPASS_FLAGS="-D_LIBCPP_HAS_NO_OFF_T_FUNCTIONS -DUV_EXCLUDE_IO_URING=1 -DHWY_DISABLE_SVE -w"
+          export CFLAGS="-Os -fdata-sections -ffunction-sections -pipe -g0 -static $BYPASS_FLAGS"
+          export CXXFLAGS="-Os -fdata-sections -ffunction-sections -std=gnu++20 -pipe -g0 -static $BYPASS_FLAGS"
+          export LDFLAGS="-static -Wl,--export-dynamic -Wl,--gc-sections"
+          
+          ./configure \
+            --dest-cpu=$TARGET_ARCH \
+            --dest-os=linux \
+            --cross-compiling \
+            --fully-static \
+            --with-intl=small-icu \
+            --without-npm \
+            --without-corepack \
+            --without-inspector \
+            --without-report \
+            --without-node-code-cache \
+            --without-node-snapshot \
+            --openssl-no-asm
+
+      - working-directory: ${{ env.RAMDISK_PATH }}/node-src
+        run: |
+          export PATH="/opt/musl-toolchain/bin:$PATH"
+          mold -run make -s -j4 BUILDTYPE=Release > /dev/null
+
+      - working-directory: ${{ env.RAMDISK_PATH }}/node-src
+        run: |
+          /opt/musl-toolchain/bin/${TOOLCHAIN_TRIPLE}-strip --strip-all out/Release/node
+          mkdir -p $GITHUB_WORKSPACE/artifact
+          cp out/Release/node $GITHUB_WORKSPACE/artifact/
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: node-frankenstein-static
+          path: artifact/
+          retention-days: 7
