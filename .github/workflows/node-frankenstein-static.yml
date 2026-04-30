@@ -74,19 +74,6 @@ jobs:
 
           v8_src_dir = 'deps/v8/src'
           
-          filepath_handles = 'deps/v8/src/handles/handles.h'
-          try:
-              with open(filepath_handles, 'r') as f: content = f.read()
-              content = content.replace('static_assert(HandleScopeData::kSizeInBytes == sizeof(HandleScopeData));', '')
-              target1 = 'This handle does not reference a heap object'
-              idx1 = content.find(target1)
-              if idx1 != -1:
-                  start_idx = content.rfind('static_assert', 0, idx1)
-                  end_idx = content.find(';', idx1) + 1
-                  if start_idx != -1 and end_idx != -1:
-                      content = content[:start_idx] + content[end_idx:]
-              with open(filepath_handles, 'w') as f: f.write(content)
-          except Exception: pass
           
           filepath_turbo = 'deps/v8/src/compiler/turboshaft/int64-lowering-reducer.h'
           try:
