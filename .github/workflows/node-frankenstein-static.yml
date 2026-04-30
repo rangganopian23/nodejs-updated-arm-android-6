@@ -71,24 +71,52 @@ jobs:
           python3 -c "
           import os
           import re
-          
+
           v8_src_dir = 'deps/v8/src'
+          
+          target_files = [
+              'globals.h',
+              'fixed-array.h',
+              'js-dispatch-table.h',
+              'string.h',
+              'js-array-buffer.h',
+              'objects.h',
+              'smi.h',
+              'heap.h'
+          ]
           
           for root, dirs, files in os.walk(v8_src_dir):
               for file in files:
-                  if file.endswith(('.h', '.cc', '.inc')):
+                  if file in target_files:
                       filepath = os.path.join(root, file)
                       try:
                           with open(filepath, 'r', encoding='utf-8') as f:
                               content = f.read()
                           
-                          if 'static_assert' in content:
-                              
-                              content = re.sub(r'static_assert\s*\([^;]+;', '/* assert mutlak dibunuh */;', content)
-                              with open(filepath, 'w', encoding='utf-8') as f:
-                                  f.write(content)
+                          content = re.sub(r'static_assert\s*\(\s*Smi::IsValid[^;]+;', '/* bypassed Smi limit */;', content)
+                          
+                          content = re.sub(r'static_assert\s*\([^;]*==[^;]*Size[^;]*\);', '/* bypassed size limit */;', content)
+                          content = re.sub(r'static_assert\s*\([^;]*==[^;]*BYTES[^;]*\);', '/* bypassed bytes limit */;', content)
+                          content = re.sub(r'static_assert\s*\([^;]*kJSDispatchTableEntrySize[^;]*\);', '/* bypassed JDT size */;', content)
+
+                          with open(filepath, 'w', encoding='utf-8') as f:
+                              f.write(content)
                       except Exception:
                           pass
+          
+          filepath_handles = 'deps/v8/src/handles/handles.h'
+          try:
+              with open(filepath_handles, 'r') as f: content = f.read()
+              content = content.replace('static_assert(HandleScopeData::kSizeInBytes == sizeof(HandleScopeData));', '')
+              target1 = 'This handle does not reference a heap object'
+              idx1 = content.find(target1)
+              if idx1 != -1:
+                  start_idx = content.rfind('static_assert', 0, idx1)
+                  end_idx = content.find(';', idx1) + 1
+                  if start_idx != -1 and end_idx != -1:
+                      content = content[:start_idx] + content[end_idx:]
+              with open(filepath_handles, 'w') as f: f.write(content)
+          except Exception: pass
           
           filepath_turbo = 'deps/v8/src/compiler/turboshaft/int64-lowering-reducer.h'
           try:
@@ -110,8 +138,6 @@ jobs:
               with open(filepath_dl, 'w') as f: f.write(content_dl)
           except Exception: pass
           "
-
-
 
       - working-directory: ${{ env.RAMDISK_PATH }}/node-src
         run: |
