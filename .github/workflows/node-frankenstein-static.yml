@@ -117,8 +117,8 @@ jobs:
           export GYP_DEFINES="host_os=linux host_arch=arm64 target_arch=arm v8_enable_sandbox=0 v8_enable_maglev=0 v8_enable_pointer_compression=0 v8_use_snapshot=false v8_enable_lite_mode=1 v8_enable_gdbjit=0 v8_enable_test_features=0 v8_enable_vtunejit=0 v8_enable_system_instrumentation=0 v8_enable_trace_maps=0 v8_enable_trace_ignition=0 v8_enable_etw=0 v8_enable_native_counters=0 v8_enable_inspector=0 node_has_winsdk=0 node_use_etw=0 node_use_perfctr=0 node_use_dtrace=0 v8_enable_highway=0 v8_use_highway=0 v8_enable_v8_simd_code=0 disable_sve=1"
           
           export BYPASS_FLAGS="-D_LIBCPP_HAS_NO_OFF_T_FUNCTIONS -DUV_EXCLUDE_IO_URING=1 -DHWY_DISABLE_SVE -w -include $GITHUB_WORKSPACE/bypass_assert.h"
-          export CFLAGS="-Os -fdata-sections -ffunction-sections -pipe -g0 -static $BYPASS_FLAGS"
-          export CXXFLAGS="-Os -fdata-sections -ffunction-sections -std=gnu++20 -pipe -g0 -static $BYPASS_FLAGS"
+          export CFLAGS="-Os -fdata-sections -ffunction-sections -pipe -g0 -static -mfpu=neon $BYPASS_FLAGS"
+          export CXXFLAGS="-Os -fdata-sections -ffunction-sections -std=gnu++20 -pipe -g0 -static -mfpu=neon $BYPASS_FLAGS"
           export LDFLAGS="-static -Wl,--export-dynamic -Wl,--gc-sections"
           
           export CFLAGS_host="-w -include $GITHUB_WORKSPACE/bypass_assert.h"
