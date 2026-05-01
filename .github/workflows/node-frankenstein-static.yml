@@ -78,6 +78,7 @@ jobs:
           try:
               with open(filepath_turbo, 'r') as f: content_turbo = f.read()
               content_turbo = content_turbo.replace('__ Tuple<Word32, Word32>', '__ template Tuple<Word32, Word32>')
+              content_turbo = content_turbo.replace('__ Word32Constant(sizeof(int32_t))', '__ Word32Constant(static_cast<uint32_t>(sizeof(int32_t)))')
               with open(filepath_turbo, 'w') as f: f.write(content_turbo)
           except Exception: pass
           
