@@ -26,7 +26,7 @@ jobs:
 
       - run: |
           sudo apt-get update
-          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y python3 make cmake git curl wget xz-utils binutils gcc g++ gcc-multilib g++-multilib pkg-config patch ccache mold unzip
+          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y python3 make cmake git curl wget xz-utils binutils gcc g++ gcc-multilib g++-multilib pkg-config patch ccache unzip
           mkdir -p $CACHE_DL_DIR
 
       - run: |
@@ -97,14 +97,14 @@ jobs:
           export STRIP="/opt/musl-toolchain/bin/${TOOLCHAIN_TRIPLE}-strip"
           export LINK="$CXX" 
           
-          export CC_host="gcc"
-          export CXX_host="g++"
-          export LINK_host="g++"
+          export CC_host="gcc -m32"
+          export CXX_host="g++ -m32"
+          export LINK_host="g++ -m32"
           export AR_host="ar"
           export NM_host="nm"
           export host_os="linux"
           
-          export GYP_DEFINES="host_os=linux host_arch=x64 target_arch=arm v8_enable_sandbox=0 v8_enable_maglev=0 v8_enable_pointer_compression=0 v8_use_snapshot=false v8_enable_lite_mode=1 v8_enable_gdbjit=0 v8_enable_test_features=0 v8_enable_vtunejit=0 v8_enable_system_instrumentation=0 v8_enable_trace_maps=0 v8_enable_trace_ignition=0 v8_enable_etw=0 v8_enable_native_counters=0 v8_enable_inspector=0 node_has_winsdk=0 node_use_etw=0 node_use_perfctr=0 node_use_dtrace=0"
+          export GYP_DEFINES="host_os=linux host_arch=ia32 target_arch=arm v8_enable_sandbox=0 v8_enable_maglev=0 v8_enable_pointer_compression=0 v8_use_snapshot=false v8_enable_lite_mode=1 v8_enable_gdbjit=0 v8_enable_test_features=0 v8_enable_vtunejit=0 v8_enable_system_instrumentation=0 v8_enable_trace_maps=0 v8_enable_trace_ignition=0 v8_enable_etw=0 v8_enable_native_counters=0 v8_enable_inspector=0 node_has_winsdk=0 node_use_etw=0 node_use_perfctr=0 node_use_dtrace=0"
           
           export BYPASS_FLAGS="-D_LIBCPP_HAS_NO_OFF_T_FUNCTIONS -DUV_EXCLUDE_IO_URING=1 -w"
           export CFLAGS="-Os -fdata-sections -ffunction-sections -pipe -g0 $BYPASS_FLAGS"
@@ -127,7 +127,7 @@ jobs:
       - working-directory: ${{ env.RAMDISK_PATH }}/node-src
         run: |
           export PATH="/opt/musl-toolchain/bin:$PATH"
-          mold -run make -s -j2 BUILDTYPE=Release > /dev/null
+          make -s -j2 BUILDTYPE=Release > /dev/null
 
       - working-directory: ${{ env.RAMDISK_PATH }}/node-src
         run: |
