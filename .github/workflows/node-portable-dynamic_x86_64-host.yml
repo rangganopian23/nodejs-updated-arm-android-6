@@ -153,6 +153,6 @@ jobs:
 
       - uses: actions/upload-artifact@v4
         with:
-          name: node-portable-dynamic-x86_64
+          name: node-portable-dynami
           path: artifact/
           retention-days: 7
