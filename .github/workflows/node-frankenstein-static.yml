@@ -15,41 +15,41 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - uses: actions/cache@v4
-        with:
-          path: |
-            ${{ env.CCACHE_DIR }}
-            ${{ env.CACHE_DL_DIR }}
-          key: ${{ runner.os }}-node-frankenstein-static-cache-${{ github.sha }}
-          restore-keys: |
-            ${{ runner.os }}-node-frankenstein-static-cache-
-
       - run: |
           sudo apt-get update
           sudo DEBIAN_FRONTEND=noninteractive apt-get install -y python3 make cmake curl wget xz-utils binutils gcc g++ pkg-config ccache mold unzip
-          mkdir -p $CACHE_DL_DIR
+          mkdir -p ${{ env.CACHE_DL_DIR }}
 
       - run: |
-          sudo mkdir -p $RAMDISK_PATH
-          sudo mount -t tmpfs -o size=10G tmpfs $RAMDISK_PATH
-          sudo chown -R $USER:$USER $RAMDISK_PATH
+          sudo mkdir -p ${{ env.RAMDISK_PATH }}
+          sudo mount -t tmpfs -o size=10G tmpfs ${{ env.RAMDISK_PATH }}
+          sudo chown -R $USER:$USER ${{ env.RAMDISK_PATH }}
 
-      - working-directory: ${{ env.RAMDISK_PATH }}
+      - uses: actions/cache@v4
+        with:
+          path: ${{ env.CCACHE_DIR }}
+          key: ${{ runner.os }}-ccache-node-${{ github.sha }}
+          restore-keys: |
+            ${{ runner.os }}-ccache-node-
+
+      - id: cache-downloads
+        uses: actions/cache@v4
+        with:
+          path: ${{ env.CACHE_DL_DIR }}
+          key: static-dl-v1-${{ env.NODE_VERSION }}-${{ env.TARGET_ARCH }}
+
+      - if: steps.cache-downloads.outputs.cache-hit != 'true'
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          if [ ! -f "$CACHE_DL_DIR/toolchain.tar.xz" ]; then
-            gh release download -p "custom-arm-toolchain.tar.xz" -R ${{ github.repository }} -O $CACHE_DL_DIR/toolchain.tar.xz
-          fi
-          sudo tar -xf $CACHE_DL_DIR/toolchain.tar.xz -C /opt
-          sudo mv /opt/custom-toolchain /opt/musl-toolchain
+          gh release download -p "musl-toolchain-aarch64-to-arm32.tar.xz" -R ${{ github.repository }} -O ${{ env.CACHE_DL_DIR }}/toolchain.tar.xz
+          wget -qO ${{ env.CACHE_DL_DIR }}/node.tar.gz https://nodejs.org/dist/${NODE_VERSION}/node-${NODE_VERSION}.tar.gz
 
       - working-directory: ${{ env.RAMDISK_PATH }}
         run: |
-          if [ ! -f "$CACHE_DL_DIR/node.tar.gz" ]; then
-            wget -qO $CACHE_DL_DIR/node.tar.gz https://nodejs.org/dist/${NODE_VERSION}/node-${NODE_VERSION}.tar.gz
-          fi
-          tar -xf $CACHE_DL_DIR/node.tar.gz
+          sudo tar -xf ${{ env.CACHE_DL_DIR }}/toolchain.tar.xz -C /opt
+          sudo mv /opt/custom-toolchain /opt/musl-toolchain
+          tar -xf ${{ env.CACHE_DL_DIR }}/node.tar.gz
           mv node-${NODE_VERSION} node-src
 
       - working-directory: ${{ env.RAMDISK_PATH }}/node-src
@@ -102,7 +102,7 @@ jobs:
           export host_os="linux"
           export GYP_DEFINES="host_os=linux host_arch=arm64 target_arch=arm v8_enable_sandbox=0 v8_enable_maglev=0 v8_enable_pointer_compression=0 v8_use_snapshot=false v8_enable_lite_mode=1 v8_enable_gdbjit=0 v8_enable_test_features=0 v8_enable_vtunejit=0 v8_enable_system_instrumentation=0 v8_enable_trace_maps=0 v8_enable_trace_ignition=0 v8_enable_etw=0 v8_enable_native_counters=0 v8_enable_inspector=0 node_has_winsdk=0 node_use_etw=0 node_use_perfctr=0 node_use_dtrace=0 v8_enable_v8_simd_code=0 disable_sve=1 arm_version=7 arm_fpu=neon"
           
-          export BYPASS_FLAGS="-D_LIBCPP_HAS_NO_OFF_T_FUNCTIONS -DUV_EXCLUDE_IO_URING=1 -w -mfpu=neon -include /mnt/ramdisk/node-src/bypass_assert.h"
+          export BYPASS_FLAGS="-D_LIBCPP_HAS_NO_OFF_T_FUNCTIONS -DUV_EXCLUDE_IO_URING=1 -DHWY_DISABLE_SVE -w -mfpu=neon -include /mnt/ramdisk/node-src/bypass_assert.h"
           export CFLAGS="-Os -fdata-sections -ffunction-sections -pipe -g0 -static $BYPASS_FLAGS"
           export CXXFLAGS="-Os -fdata-sections -ffunction-sections -std=gnu++20 -pipe -g0 -static $BYPASS_FLAGS"
           export LDFLAGS="-static -Wl,--export-dynamic -Wl,--gc-sections"
@@ -132,8 +132,9 @@ jobs:
       - working-directory: ${{ env.RAMDISK_PATH }}/node-src
         run: |
           export PATH="/usr/lib/ccache:/opt/musl-toolchain/bin:$PATH"
-          export CC="ccache arm-linux-musleabihf-gcc -w -mfpu=neon -include /mnt/ramdisk/node-src/bypass_assert.h"
-          export CXX="ccache arm-linux-musleabihf-g++ -w -mfpu=neon -include /mnt/ramdisk/node-src/bypass_assert.h"
+          export BYPASS_FLAGS="-D_LIBCPP_HAS_NO_OFF_T_FUNCTIONS -DUV_EXCLUDE_IO_URING=1 -DHWY_DISABLE_SVE -w -mfpu=neon -include /mnt/ramdisk/node-src/bypass_assert.h"
+          export CC="ccache arm-linux-musleabihf-gcc $BYPASS_FLAGS"
+          export CXX="ccache arm-linux-musleabihf-g++ $BYPASS_FLAGS"
           export LINK="$CXX"
           export CC_host="ccache gcc -w -DHWY_COMPILE_ONLY_SCALAR=1 -include /mnt/ramdisk/node-src/bypass_assert.h"
           export CXX_host="ccache g++ -w -DHWY_COMPILE_ONLY_SCALAR=1 -include /mnt/ramdisk/node-src/bypass_assert.h"
