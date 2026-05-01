@@ -9,6 +9,7 @@ jobs:
       NODE_VERSION: "v24.15.0"
       TARGET_ARCH: "arm"
       TOOLCHAIN_TRIPLE: "arm-linux-musleabihf"
+      HOST_TRIPLE: "aarch64-linux-musl"
       RAMDISK_PATH: "/mnt/ramdisk"
       CCACHE_DIR: "/home/runner/.ccache"
       CACHE_DL_DIR: "/home/runner/downloads"
@@ -17,14 +18,8 @@ jobs:
 
       - run: |
           sudo apt-get update
-          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y software-properties-common
-          sudo add-apt-repository ppa:ubuntu-toolchain-r/test -y
-          sudo apt-get update
-          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y python3 make cmake git curl wget xz-utils binutils pkg-config patch ccache unzip gcc-15 g++-15
+          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y python3 make cmake git curl wget xz-utils binutils pkg-config patch ccache unzip
           mkdir -p ${{ env.CACHE_DL_DIR }}
-          gcc --version
-          ccache --version
-          gcc-15 --version
 
       - run: |
           sudo mkdir -p ${{ env.RAMDISK_PATH }}
@@ -34,27 +29,30 @@ jobs:
       - uses: actions/cache@v4
         with:
           path: ${{ env.CCACHE_DIR }}
-          key: ${{ runner.os }}-ccache-static-arm64-gcc15-${{ github.sha }}
+          key: ${{ runner.os }}-ccache-static-arm64-dual-mcm-${{ github.sha }}
           restore-keys: |
-            ${{ runner.os }}-ccache-static-arm64-gcc15-
+            ${{ runner.os }}-ccache-static-arm64-dual-mcm-
 
       - id: cache-downloads
         uses: actions/cache@v4
         with:
           path: ${{ env.CACHE_DL_DIR }}
-          key: static-dl-v2-target-only-${{ env.NODE_VERSION }}-${{ env.TARGET_ARCH }}-arm64
+          key: static-dl-v3-dual-toolchain-${{ env.NODE_VERSION }}-${{ env.TARGET_ARCH }}-arm64
 
       - if: steps.cache-downloads.outputs.cache-hit != 'true'
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh release download -p "musl-toolchain-aarch64-to-arm32.tar.xz" -R ${{ github.repository }} -O ${{ env.CACHE_DL_DIR }}/toolchain.tar.xz
+          gh release download -p "musl-toolchain-aarch64-to-arm32.tar.xz" -R ${{ github.repository }} -O ${{ env.CACHE_DL_DIR }}/target-toolchain.tar.xz
+          gh release download -p "host-gcc15-aarch64.tar.xz" -R ${{ github.repository }} -O ${{ env.CACHE_DL_DIR }}/host-toolchain.tar.xz
           wget -qO ${{ env.CACHE_DL_DIR }}/node.tar.gz https://nodejs.org/dist/${NODE_VERSION}/node-${NODE_VERSION}.tar.gz
 
       - working-directory: ${{ env.RAMDISK_PATH }}
         run: |
-          sudo tar -xf ${{ env.CACHE_DL_DIR }}/toolchain.tar.xz -C /opt
-          sudo mv /opt/custom-toolchain /opt/musl-toolchain
+          sudo tar -xf ${{ env.CACHE_DL_DIR }}/target-toolchain.tar.xz -C /opt
+          sudo mv /opt/custom-toolchain /opt/target-toolchain
+          sudo tar -xf ${{ env.CACHE_DL_DIR }}/host-toolchain.tar.xz -C /opt
+          sudo mv /opt/custom-toolchain /opt/host-toolchain
           tar -xf ${{ env.CACHE_DL_DIR }}/node.tar.gz
           mv node-${NODE_VERSION} node-src
 
@@ -98,27 +96,28 @@ jobs:
 
       - working-directory: ${{ env.RAMDISK_PATH }}/node-src
         run: |
-          export PATH="/usr/lib/ccache:/opt/musl-toolchain/bin:$PATH"
+          export PATH="/usr/lib/ccache:/opt/target-toolchain/bin:/opt/host-toolchain/bin:$PATH"
           export AR="${TOOLCHAIN_TRIPLE}-ar"
           export NM="${TOOLCHAIN_TRIPLE}-nm"
           export STRIP="${TOOLCHAIN_TRIPLE}-strip"
-          export AR_host="ar"
-          export NM_host="nm"
+          export AR_host="${HOST_TRIPLE}-ar"
+          export NM_host="${HOST_TRIPLE}-nm"
           export host_os="linux"
           
           export GYP_DEFINES="host_os=linux host_arch=arm64 target_arch=arm v8_enable_sandbox=0 v8_enable_maglev=0 v8_enable_pointer_compression=0 v8_use_snapshot=false v8_enable_lite_mode=1 v8_enable_gdbjit=0 v8_enable_test_features=0 v8_enable_vtunejit=0 v8_enable_system_instrumentation=0 v8_enable_trace_maps=0 v8_enable_trace_ignition=0 v8_enable_etw=0 v8_enable_native_counters=0 v8_enable_inspector=0 node_has_winsdk=0 node_use_etw=0 node_use_perfctr=0 node_use_dtrace=0 arm_version=7 arm_fpu=neon"
           
-          export BYPASS_FLAGS="-D_LIBCPP_HAS_NO_OFF_T_FUNCTIONS -DUV_EXCLUDE_IO_URING=1 -w -mfpu=neon -include /mnt/ramdisk/node-src/bypass_assert.h"
-          export CFLAGS="-Os -fdata-sections -ffunction-sections -pipe -g0 -static $BYPASS_FLAGS"
-          export CXXFLAGS="-Os -fdata-sections -ffunction-sections -std=gnu++20 -pipe -g0 -static $BYPASS_FLAGS"
+          export BYPASS_FLAGS_TARGET="-D_LIBCPP_HAS_NO_OFF_T_FUNCTIONS -DUV_EXCLUDE_IO_URING=1 -w -mfpu=neon -include /mnt/ramdisk/node-src/bypass_assert.h"
+          export CFLAGS="-Os -fdata-sections -ffunction-sections -pipe -g0 -static $BYPASS_FLAGS_TARGET"
+          export CXXFLAGS="-Os -fdata-sections -ffunction-sections -std=gnu++20 -pipe -g0 -static $BYPASS_FLAGS_TARGET"
           export LDFLAGS="-static -Wl,--export-dynamic -Wl,--gc-sections"
           
-          export CC_host="ccache gcc-15 -w -include /mnt/ramdisk/node-src/bypass_assert.h"
-          export CXX_host="ccache g++-15 -w -include /mnt/ramdisk/node-src/bypass_assert.h"
+          export BYPASS_FLAGS_HOST="-w -include /mnt/ramdisk/node-src/bypass_assert.h"
+          export CC_host="ccache ${HOST_TRIPLE}-gcc $BYPASS_FLAGS_HOST"
+          export CXX_host="ccache ${HOST_TRIPLE}-g++ $BYPASS_FLAGS_HOST"
           export LINK_host="$CXX_host"
           
-          export CC="ccache ${TOOLCHAIN_TRIPLE}-gcc $BYPASS_FLAGS"
-          export CXX="ccache ${TOOLCHAIN_TRIPLE}-g++ $BYPASS_FLAGS"
+          export CC="ccache ${TOOLCHAIN_TRIPLE}-gcc $BYPASS_FLAGS_TARGET"
+          export CXX="ccache ${TOOLCHAIN_TRIPLE}-g++ $BYPASS_FLAGS_TARGET"
           export LINK="$CXX"
           
           ./configure \
@@ -137,13 +136,14 @@ jobs:
 
       - working-directory: ${{ env.RAMDISK_PATH }}/node-src
         run: |
-          export PATH="/usr/lib/ccache:/opt/musl-toolchain/bin:$PATH"
-          export BYPASS_FLAGS="-D_LIBCPP_HAS_NO_OFF_T_FUNCTIONS -DUV_EXCLUDE_IO_URING=1 -w -mfpu=neon -include /mnt/ramdisk/node-src/bypass_assert.h"
-          export CC="ccache ${TOOLCHAIN_TRIPLE}-gcc $BYPASS_FLAGS"
-          export CXX="ccache ${TOOLCHAIN_TRIPLE}-g++ $BYPASS_FLAGS"
+          export PATH="/usr/lib/ccache:/opt/target-toolchain/bin:/opt/host-toolchain/bin:$PATH"
+          export BYPASS_FLAGS_TARGET="-D_LIBCPP_HAS_NO_OFF_T_FUNCTIONS -DUV_EXCLUDE_IO_URING=1 -w -mfpu=neon -include /mnt/ramdisk/node-src/bypass_assert.h"
+          export BYPASS_FLAGS_HOST="-w -include /mnt/ramdisk/node-src/bypass_assert.h"
+          export CC="ccache ${TOOLCHAIN_TRIPLE}-gcc $BYPASS_FLAGS_TARGET"
+          export CXX="ccache ${TOOLCHAIN_TRIPLE}-g++ $BYPASS_FLAGS_TARGET"
           export LINK="$CXX"
-          export CC_host="ccache gcc-15 -w -include /mnt/ramdisk/node-src/bypass_assert.h"
-          export CXX_host="ccache g++-15 -w -include /mnt/ramdisk/node-src/bypass_assert.h"
+          export CC_host="ccache ${HOST_TRIPLE}-gcc $BYPASS_FLAGS_HOST"
+          export CXX_host="ccache ${HOST_TRIPLE}-g++ $BYPASS_FLAGS_HOST"
           export LINK_host="$CXX_host"
           
           ccache -z
@@ -152,7 +152,7 @@ jobs:
 
       - working-directory: ${{ env.RAMDISK_PATH }}/node-src
         run: |
-          /opt/musl-toolchain/bin/${TOOLCHAIN_TRIPLE}-strip --strip-all out/Release/node
+          /opt/target-toolchain/bin/${TOOLCHAIN_TRIPLE}-strip --strip-all out/Release/node
           mkdir -p $GITHUB_WORKSPACE/artifact
           cp out/Release/node $GITHUB_WORKSPACE/artifact/
 
