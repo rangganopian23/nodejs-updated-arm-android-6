@@ -39,7 +39,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           if [ ! -f "$CACHE_DL_DIR/toolchain.tar.xz" ]; then
-            gh release download -p "custom-arm-toolchain.tar.xz" -R negesis23/static-binaries-arm -O $CACHE_DL_DIR/toolchain.tar.xz
+            gh release download -p "custom-arm-toolchain.tar.xz" -R ${{ github.repository }} -O $CACHE_DL_DIR/toolchain.tar.xz
           fi
           sudo tar -xf $CACHE_DL_DIR/toolchain.tar.xz -C /opt
           sudo mv /opt/custom-toolchain /opt/musl-toolchain
