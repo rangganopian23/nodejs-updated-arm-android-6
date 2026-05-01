@@ -54,7 +54,7 @@ jobs:
       - uses: softprops/action-gh-release@v2
         with:
           tag_name: toolchain-v1.3
-          name: "Custom Musl Toolchain (ARM64 to ARM32) Build #${{ github.run_number }}""
+          name: "Custom Musl Toolchain (ARM64 to ARM32) Build #${{ github.run_number }}"
           files: /opt/custom-arm-toolchain.tar.xz
           draft: false
           prerelease: false
