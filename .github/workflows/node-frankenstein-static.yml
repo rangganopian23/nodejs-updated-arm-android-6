@@ -29,9 +29,9 @@ jobs:
       - uses: actions/cache@v4
         with:
           path: ${{ env.CCACHE_DIR }}
-          key: ${{ runner.os }}-ccache-node-frankenstein-static-arm64-${{ github.sha }}
+          key: ${{ runner.os }}-ccache-node-frankenstein-static-arm64-v1-${{ github.sha }}
           restore-keys: |
-            ${{ runner.os }}-ccache-node-frankenstein-static-arm64-
+            ${{ runner.os }}-ccache-node-frankenstein-static-arm64-v1-
 
       - id: cache-downloads
         uses: actions/cache@v4
