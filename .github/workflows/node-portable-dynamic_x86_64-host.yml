@@ -127,7 +127,7 @@ jobs:
       - working-directory: ${{ env.RAMDISK_PATH }}/node-src
         run: |
           export PATH="/opt/musl-toolchain/bin:$PATH"
-          mold -s -run make -j2 BUILDTYPE=Release > /dev/null
+          mold -run make -s -j2 BUILDTYPE=Release > /dev/null
 
       - working-directory: ${{ env.RAMDISK_PATH }}/node-src
         run: |
