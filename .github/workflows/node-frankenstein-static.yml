@@ -50,9 +50,9 @@ jobs:
       - working-directory: ${{ env.RAMDISK_PATH }}
         run: |
           sudo tar -xf ${{ env.CACHE_DL_DIR }}/target-toolchain.tar.xz -C /opt
-          sudo mv /opt/custom-toolchain /opt/target-toolchain
+          sudo mv /opt/musl-toolchain /opt/target-toolchain
           sudo tar -xf ${{ env.CACHE_DL_DIR }}/host-toolchain.tar.xz -C /opt
-          sudo mv /opt/custom-toolchain /opt/host-toolchain
+          sudo mv /opt/musl-toolchain /opt/host-toolchain
           tar -xf ${{ env.CACHE_DL_DIR }}/node.tar.gz
           mv node-${NODE_VERSION} node-src
 
