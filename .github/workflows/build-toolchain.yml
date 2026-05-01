@@ -10,14 +10,14 @@ on:
       release_name:
         description: 'Release Title'
         required: true
-        default: 'Musl Cross-Compiler Toolchain (ARM32 Target)'
+        default: 'Musl Cross-Compiler Toolchain (Dual Build)'
 
 permissions:
   contents: write
 
 jobs:
   build:
-    name: Compile on ${{ matrix.host_arch }}
+    name: Compile ${{ matrix.toolchain_target }} on ${{ matrix.host_arch }}
     runs-on: ${{ matrix.os }}
     timeout-minutes: 180
     strategy:
@@ -26,13 +26,25 @@ jobs:
         include:
           - os: ubuntu-latest
             host_arch: x86_64
+            toolchain_target: arm-linux-musleabihf
+            archive_name: musl-toolchain-x86_64-to-arm32.tar.xz
+            fpu_flag: --with-arch=armv7-a --with-float=hard --with-fpu=neon-vfpv4
+
           - os: ubuntu-24.04-arm
             host_arch: aarch64
+            toolchain_target: arm-linux-musleabihf
+            archive_name: musl-toolchain-aarch64-to-arm32.tar.xz
+            fpu_flag: --with-arch=armv7-a --with-float=hard --with-fpu=neon-vfpv4
+
+          - os: ubuntu-24.04-arm
+            host_arch: aarch64
+            toolchain_target: aarch64-linux-musl
+            archive_name: host-gcc15-aarch64.tar.xz
+            fpu_flag: --with-arch=armv8-a
+            
     env:
-      TARGET_TRIPLE: "arm-linux-musleabihf"
       MUSL_VERSION: "1.2.5"
       GCC_VERSION: "15.1.0"
-      ARCHIVE_NAME: "musl-toolchain-${{ matrix.host_arch }}-to-arm32.tar.xz"
     
     steps:
       - name: Install Build Dependencies
@@ -46,13 +58,13 @@ jobs:
       - name: Configure Toolchain Specifications
         working-directory: mcm
         run: |
-          cat << 'EOF' > config.mak
-          TARGET = arm-linux-musleabihf
-          MUSL_VER = 1.2.5
-          GCC_VER = 15.1.0
+          cat << EOF > config.mak
+          TARGET = ${{ matrix.toolchain_target }}
+          MUSL_VER = $MUSL_VERSION
+          GCC_VER = $GCC_VERSION
           OUTPUT = /opt/musl-toolchain
           COMMON_CONFIG += CFLAGS="-g0 -Os" CXXFLAGS="-g0 -Os" LDFLAGS="-s"
-          GCC_CONFIG += --with-arch=armv7-a --with-float=hard --with-fpu=neon-vfpv4
+          GCC_CONFIG += ${{ matrix.fpu_flag }}
           EOF
 
       - name: Apply Termux Environment Patches
@@ -74,13 +86,13 @@ jobs:
       - name: Package Final Archive
         run: |
           cd /opt
-          tar -cJf ${{ env.ARCHIVE_NAME }} musl-toolchain
+          tar -cJf ${{ matrix.archive_name }} musl-toolchain
 
       - name: Upload Artifact for Release Sync
         uses: actions/upload-artifact@v4
         with:
-          name: toolchain-${{ matrix.host_arch }}
-          path: /opt/${{ env.ARCHIVE_NAME }}
+          name: toolchain-${{ matrix.archive_name }}
+          path: /opt/${{ matrix.archive_name }}
           retention-days: 1
 
   publish:
@@ -101,18 +113,16 @@ jobs:
           tag_name: ${{ github.event.inputs.release_tag }}
           name: "${{ github.event.inputs.release_name }} - ${{ github.event.inputs.release_tag }}"
           body: |
-            ### Pre-built Musl Cross-Compiler Toolchains
+            ### Pre-built Musl Cross-Compiler Toolchains (V2 Dual-Forge)
 
-            This release provides high-performance, custom-built `arm-linux-musleabihf` toolchains. They are explicitly patched to bypass standard `/etc/` root paths, ensuring native DNS resolution compatibility within Termux/Android environments.
-
-            **Core Components:**
-            * **GCC Version:** 15.1.0
-            * **Musl C Library:** 1.2.5
-            * **Target Architecture:** ARMv7-A (Hard Float ABI, NEON-VFPv4 SIMD)
+            This release provides high-performance, custom-built toolchains compiled from source via MCM.
             
-            **Available Host Binaries:**
-            * `musl-toolchain-x86_64-to-arm32.tar.xz` (For standard Linux PC, Servers, and WSL)
-            * `musl-toolchain-aarch64-to-arm32.tar.xz` (For ARM64 devices, Termux host, Apple Silicon via Linux VM)
+            **Available Toolchains:**
+            1. **Target Compilers (ARM32 - J2 Prime):**
+               - `musl-toolchain-x86_64-to-arm32.tar.xz`
+               - `musl-toolchain-aarch64-to-arm32.tar.xz`
+            2. **Host Compiler (ARM64 Native GCC 15):**
+               - `host-gcc15-aarch64.tar.xz` (Use this as CC_host in Node.js build to bypass Ubuntu GCC 13 bugs).
 
             *Generated automatically via GitHub Actions CI/CD Pipeline.*
           files: release-assets/*.tar.xz
