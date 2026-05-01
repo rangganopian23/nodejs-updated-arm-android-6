@@ -111,7 +111,7 @@ jobs:
           export CXXFLAGS="-Os -fdata-sections -ffunction-sections -std=gnu++20 -pipe -g0 -static $BYPASS_FLAGS_TARGET"
           export LDFLAGS="-static -Wl,--export-dynamic -Wl,--gc-sections"
           
-          export BYPASS_FLAGS_HOST="-w -include /mnt/ramdisk/node-src/bypass_assert.h"
+          export BYPASS_FLAGS_HOST="-DHWY_DISABLE_SVE -march=armv8-a+simd+crc -w -include /mnt/ramdisk/node-src/bypass_assert.h"
           export CC_host="ccache ${HOST_TRIPLE}-gcc $BYPASS_FLAGS_HOST"
           export CXX_host="ccache ${HOST_TRIPLE}-g++ $BYPASS_FLAGS_HOST"
           export LINK_host="$CXX_host"
@@ -138,7 +138,7 @@ jobs:
         run: |
           export PATH="/usr/lib/ccache:/opt/target-toolchain/bin:/opt/host-toolchain/bin:$PATH"
           export BYPASS_FLAGS_TARGET="-D_LIBCPP_HAS_NO_OFF_T_FUNCTIONS -DUV_EXCLUDE_IO_URING=1 -w -mfpu=neon -include /mnt/ramdisk/node-src/bypass_assert.h"
-          export BYPASS_FLAGS_HOST="-w -include /mnt/ramdisk/node-src/bypass_assert.h"
+          export BYPASS_FLAGS_HOST="-DHWY_DISABLE_SVE -march=armv8-a+simd+crc -w -include /mnt/ramdisk/node-src/bypass_assert.h"
           export CC="ccache ${TOOLCHAIN_TRIPLE}-gcc $BYPASS_FLAGS_TARGET"
           export CXX="ccache ${TOOLCHAIN_TRIPLE}-g++ $BYPASS_FLAGS_TARGET"
           export LINK="$CXX"
