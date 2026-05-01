@@ -73,6 +73,7 @@ jobs:
           python3 -c "
           import sys
           import os
+          import re
           
           filepath_turbo = 'deps/v8/src/compiler/turboshaft/int64-lowering-reducer.h'
           try:
@@ -117,6 +118,13 @@ jobs:
                       new_func = 'bool FastJsonStringifier<Char>::AppendStringSIMD(const SrcChar* src, size_t length, const DisallowGarbageCollection& no_gc) { return false; }\n'
                       content = content[:start_idx] + new_func + content[end_idx:]
                       with open(filepath_json, 'w') as f: f.write(content)
+          except Exception: pass
+          
+          filepath_wasm = 'deps/v8/src/wasm/baseline/arm/liftoff-assembler-arm-inl.h'
+          try:
+              with open(filepath_wasm, 'r') as f: content_wasm = f.read()
+              content_wasm = re.sub(r'(offset_reg,\s*)uint32_t', r'\1uintptr_t', content_wasm)
+              with open(filepath_wasm, 'w') as f: f.write(content_wasm)
           except Exception: pass
           "
 
