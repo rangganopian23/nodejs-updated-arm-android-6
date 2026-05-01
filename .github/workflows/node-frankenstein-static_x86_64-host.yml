@@ -28,9 +28,9 @@ jobs:
       - uses: actions/cache@v4
         with:
           path: ${{ env.CCACHE_DIR }}
-          key: ${{ runner.os }}-ccache-frankenstein-static-x86_64-${{ github.sha }}
+          key: ${{ runner.os }}-ccache-node-frankenstein-static-x86_64-${{ github.sha }}
           restore-keys: |
-            ${{ runner.os }}-ccache-frankenstein-static-x86_64-
+            ${{ runner.os }}-ccache-node-frankenstein-static-x86_64-
 
       - id: cache-downloads
         uses: actions/cache@v4
@@ -120,9 +120,13 @@ jobs:
           export CXXFLAGS="-Os -fdata-sections -ffunction-sections -std=gnu++20 -pipe -g0 -static $BYPASS_FLAGS"
           export LDFLAGS="-static -Wl,--export-dynamic -Wl,--gc-sections"
           
-          export CC_host="ccache gcc -m32 -w"
-          export CXX_host="ccache g++ -m32 -w"
-          export LINK_host="ccache g++ -m32 -w -lm -lpthread -lrt"
+          export CFLAGS_host="-w"
+          export CXXFLAGS_host="-w"
+          export LDFLAGS_host=""
+          
+          export CC_host="ccache gcc -m32 $CFLAGS_host"
+          export CXX_host="ccache g++ -m32 $CXXFLAGS_host"
+          export LINK_host="ccache g++ -m32 $LDFLAGS_host"
           
           export CC="ccache arm-linux-musleabihf-gcc $BYPASS_FLAGS"
           export CXX="ccache arm-linux-musleabihf-g++ $BYPASS_FLAGS"
@@ -146,12 +150,17 @@ jobs:
         run: |
           export PATH="/usr/lib/ccache:/opt/musl-toolchain/bin:$PATH"
           export BYPASS_FLAGS="-D_LIBCPP_HAS_NO_OFF_T_FUNCTIONS -DUV_EXCLUDE_IO_URING=1 -w"
+          export CFLAGS_host="-w"
+          export CXXFLAGS_host="-w"
+          export LDFLAGS_host=""
+          
           export CC="ccache arm-linux-musleabihf-gcc $BYPASS_FLAGS"
           export CXX="ccache arm-linux-musleabihf-g++ $BYPASS_FLAGS"
           export LINK="$CXX"
-          export CC_host="ccache gcc -m32 -w"
-          export CXX_host="ccache g++ -m32 -w"
-          export LINK_host="ccache g++ -m32 -w -lm -lpthread -lrt"
+          
+          export CC_host="ccache gcc -m32 $CFLAGS_host"
+          export CXX_host="ccache g++ -m32 $CXXFLAGS_host"
+          export LINK_host="ccache g++ -m32 $LDFLAGS_host"
           
           ccache -z
           make -s -j$(nproc) BUILDTYPE=Release > /dev/null
