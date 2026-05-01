@@ -137,7 +137,6 @@ jobs:
             --dest-cpu=$TARGET_ARCH \
             --dest-os=linux \
             --cross-compiling \
-            --fully-static \
             --with-intl=small-icu \
             --without-npm \
             --without-corepack \
