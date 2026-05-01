@@ -66,7 +66,7 @@ jobs:
           sed -i '/Target architecture arm is only supported/d' deps/v8/include/v8config.h
           sed -i '1i #define HWY_COMPILE_ONLY_SCALAR 1' deps/v8/third_party/highway/src/hwy/detect_targets.h
           find deps/v8 -type f \( -name "*.gyp" -o -name "*.gypi" \) -exec sed -i 's/+sve//g' {} +
-          echo '#define static_assert(...)' > $GITHUB_WORKSPACE/bypass_assert.h
+          echo '#define static_assert(...)' > /mnt/ramdisk/node-src/bypass_assert.h
           
           python3 -c "
           import os
@@ -114,19 +114,20 @@ jobs:
           export NM_host="nm"
           export host_os="linux"
           
-          export GYP_DEFINES="host_os=linux host_arch=arm64 target_arch=arm v8_enable_sandbox=0 v8_enable_maglev=0 v8_enable_pointer_compression=0 v8_use_snapshot=false v8_enable_lite_mode=1 v8_enable_gdbjit=0 v8_enable_test_features=0 v8_enable_vtunejit=0 v8_enable_system_instrumentation=0 v8_enable_trace_maps=0 v8_enable_trace_ignition=0 v8_enable_etw=0 v8_enable_native_counters=0 v8_enable_inspector=0 node_has_winsdk=0 node_use_etw=0 node_use_perfctr=0 node_use_dtrace=0 v8_enable_highway=0 v8_use_highway=0 v8_enable_v8_simd_code=0 disable_sve=1"
+          export GYP_DEFINES="host_os=linux host_arch=arm64 target_arch=arm v8_enable_sandbox=0 v8_enable_maglev=0 v8_enable_pointer_compression=0 v8_use_snapshot=false v8_enable_lite_mode=1 v8_enable_gdbjit=0 v8_enable_test_features=0 v8_enable_vtunejit=0 v8_enable_system_instrumentation=0 v8_enable_trace_maps=0 v8_enable_trace_ignition=0 v8_enable_etw=0 v8_enable_native_counters=0 v8_enable_inspector=0 node_has_winsdk=0 node_use_etw=0 node_use_perfctr=0 node_use_dtrace=0 v8_enable_highway=0 v8_use_highway=0 v8_enable_v8_simd_code=0 disable_sve=1 arm_fpu=neon"
           
-          export BYPASS_FLAGS="-D_LIBCPP_HAS_NO_OFF_T_FUNCTIONS -DUV_EXCLUDE_IO_URING=1 -DHWY_DISABLE_SVE -w -include $GITHUB_WORKSPACE/bypass_assert.h"
+          export BYPASS_FLAGS="-D_LIBCPP_HAS_NO_OFF_T_FUNCTIONS -DUV_EXCLUDE_IO_URING=1 -DHWY_DISABLE_SVE -w -include /mnt/ramdisk/node-src/bypass_assert.h"
           export CFLAGS="-Os -fdata-sections -ffunction-sections -pipe -g0 -static -mfpu=neon $BYPASS_FLAGS"
           export CXXFLAGS="-Os -fdata-sections -ffunction-sections -std=gnu++20 -pipe -g0 -static -mfpu=neon $BYPASS_FLAGS"
           export LDFLAGS="-static -Wl,--export-dynamic -Wl,--gc-sections"
           
-          export CFLAGS_host="-w -include $GITHUB_WORKSPACE/bypass_assert.h"
-          export CXXFLAGS_host="-w -include $GITHUB_WORKSPACE/bypass_assert.h"
-          export CC_host="gcc -w -include $GITHUB_WORKSPACE/bypass_assert.h"
-          export CXX_host="g++ -w -include $GITHUB_WORKSPACE/bypass_assert.h"
-          export CC="arm-linux-musleabihf-gcc -w -include $GITHUB_WORKSPACE/bypass_assert.h"
-          export CXX="arm-linux-musleabihf-g++ -w -include $GITHUB_WORKSPACE/bypass_assert.h"
+          export CFLAGS_host="-w -include /mnt/ramdisk/node-src/bypass_assert.h"
+          export CXXFLAGS_host="-w -include /mnt/ramdisk/node-src/bypass_assert.h"
+          export CC_host="gcc -w -include /mnt/ramdisk/node-src/bypass_assert.h"
+          export CXX_host="g++ -w -include /mnt/ramdisk/node-src/bypass_assert.h"
+          export CC="arm-linux-musleabihf-gcc -w -mfpu=neon -include /mnt/ramdisk/node-src/bypass_assert.h"
+          export CXX="arm-linux-musleabihf-g++ -w -mfpu=neon -include /mnt/ramdisk/node-src/bypass_assert.h"
+          
           ./configure \
             --dest-cpu=$TARGET_ARCH \
             --dest-os=linux \
