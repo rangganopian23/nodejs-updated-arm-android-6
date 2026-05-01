@@ -4,7 +4,7 @@ on:
 jobs:
   build-node-musl:
     runs-on: ubuntu-24.04-arm
-    timeout-minutes: 180
+    timeout-minutes: 360
     env:
       NODE_VERSION: "v24.15.0"
       TARGET_ARCH: "arm"
