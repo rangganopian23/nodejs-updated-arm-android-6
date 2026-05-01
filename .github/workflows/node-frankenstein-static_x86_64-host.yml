@@ -109,9 +109,6 @@ jobs:
           export STRIP="/opt/musl-toolchain/bin/${TOOLCHAIN_TRIPLE}-strip"
           export LINK="$CXX" 
           
-          export CC_host="gcc -m32"
-          export CXX_host="g++ -m32"
-          export LINK_host="g++ -m32"
           export AR_host="ar"
           export NM_host="nm"
           export host_os="linux"
@@ -125,7 +122,7 @@ jobs:
           
           export CC_host="ccache gcc -m32 -w"
           export CXX_host="ccache g++ -m32 -w"
-          export LINK_host="$CXX_host"
+          export LINK_host="ccache g++ -m32 -w -lm -lpthread -lrt"
           
           export CC="ccache arm-linux-musleabihf-gcc $BYPASS_FLAGS"
           export CXX="ccache arm-linux-musleabihf-g++ $BYPASS_FLAGS"
@@ -154,7 +151,7 @@ jobs:
           export LINK="$CXX"
           export CC_host="ccache gcc -m32 -w"
           export CXX_host="ccache g++ -m32 -w"
-          export LINK_host="$CXX_host"
+          export LINK_host="ccache g++ -m32 -w -lm -lpthread -lrt"
           
           ccache -z
           make -s -j$(nproc) BUILDTYPE=Release > /dev/null
