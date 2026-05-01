@@ -3,7 +3,7 @@ on:
   workflow_dispatch:
 jobs:
   build-node-musl:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-22.04
     timeout-minutes: 360
     env:
       NODE_VERSION: "v24.15.0"
