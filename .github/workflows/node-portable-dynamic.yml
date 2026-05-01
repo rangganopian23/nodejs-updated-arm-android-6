@@ -37,7 +37,7 @@ jobs:
         uses: actions/cache@v4
         with:
           path: ${{ env.CACHE_DL_DIR }}
-          key: static-dl-v1-dual-toolchain-${{ env.NODE_VERSION }}-${{ env.TARGET_ARCH }}-arm64
+          key: static-dl-v1-${{ env.NODE_VERSION }}-${{ env.TARGET_ARCH }}-arm64
 
       - if: steps.cache-downloads.outputs.cache-hit != 'true'
         env:
