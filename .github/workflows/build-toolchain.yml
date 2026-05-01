@@ -1,0 +1,120 @@
+name: Build & Release Musl Cross-Compiler Toolchain
+
+on:
+  workflow_dispatch:
+    inputs:
+      release_tag:
+        description: 'Target Release Tag (e.g., v1.0.0)'
+        required: true
+        default: 'v1.0.0'
+      release_name:
+        description: 'Release Title'
+        required: true
+        default: 'Musl Cross-Compiler Toolchain (ARM32 Target)'
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    name: Compile on ${{ matrix.host_arch }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 180
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            host_arch: x86_64
+          - os: ubuntu-24.04-arm
+            host_arch: aarch64
+    env:
+      TARGET_TRIPLE: "arm-linux-musleabihf"
+      MUSL_VERSION: "1.2.5"
+      GCC_VERSION: "15.1.0"
+      ARCHIVE_NAME: "musl-toolchain-${{ matrix.host_arch }}-to-arm32.tar.xz"
+    
+    steps:
+      - name: Install Build Dependencies
+        run: |
+          sudo apt-get update
+          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y build-essential curl wget git python3 rsync patch tar texinfo bison flex gawk bzip2
+      
+      - name: Clone musl-cross-make
+        run: git clone https://github.com/richfelker/musl-cross-make.git mcm
+
+      - name: Configure Toolchain Specifications
+        working-directory: mcm
+        run: |
+          cat << 'EOF' > config.mak
+          TARGET = arm-linux-musleabihf
+          MUSL_VER = 1.2.5
+          GCC_VER = 15.1.0
+          OUTPUT = /opt/musl-toolchain
+          COMMON_CONFIG += CFLAGS="-g0 -Os" CXXFLAGS="-g0 -Os" LDFLAGS="-s"
+          GCC_CONFIG += --with-arch=armv7-a --with-float=hard --with-fpu=neon-vfpv4
+          EOF
+
+      - name: Apply Termux Environment Patches
+        working-directory: mcm
+        run: |
+          make extract_all
+          MUSL_SRC_DIR=$(find . -maxdepth 1 -type d -name "musl-*" | head -n 1)
+          if [ -n "$MUSL_SRC_DIR" ]; then
+            sed -i 's|"/etc/resolv.conf"|"/data/data/com.termux/files/usr/etc/resolv.conf"|g' "$MUSL_SRC_DIR/src/network/resolvconf.c"
+            sed -i 's|"/etc/hosts"|"/data/data/com.termux/files/usr/etc/hosts"|g' "$MUSL_SRC_DIR/src/network/lookup_name.c"
+          fi
+
+      - name: Compile and Install Toolchain
+        working-directory: mcm
+        run: |
+          make -s -j$(nproc) > /dev/null
+          sudo make install
+
+      - name: Package Final Archive
+        run: |
+          cd /opt
+          tar -cJf ${{ env.ARCHIVE_NAME }} musl-toolchain
+
+      - name: Upload Artifact for Release Sync
+        uses: actions/upload-artifact@v4
+        with:
+          name: toolchain-${{ matrix.host_arch }}
+          path: /opt/${{ env.ARCHIVE_NAME }}
+          retention-days: 1
+
+  publish:
+    name: Publish GitHub Release
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Synchronize Build Artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: release-assets
+          pattern: toolchain-*
+          merge-multiple: true
+
+      - name: Execute GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.event.inputs.release_tag }}
+          name: "${{ github.event.inputs.release_name }} - ${{ github.event.inputs.release_tag }}"
+          body: |
+            ### Pre-built Musl Cross-Compiler Toolchains
+
+            This release provides high-performance, custom-built `arm-linux-musleabihf` toolchains. They are explicitly patched to bypass standard `/etc/` root paths, ensuring native DNS resolution compatibility within Termux/Android environments.
+
+            **Core Components:**
+            * **GCC Version:** 15.1.0
+            * **Musl C Library:** 1.2.5
+            * **Target Architecture:** ARMv7-A (Hard Float ABI, NEON-VFPv4 SIMD)
+            
+            **Available Host Binaries:**
+            * `musl-toolchain-x86_64-to-arm32.tar.xz` (For standard Linux PC, Servers, and WSL)
+            * `musl-toolchain-aarch64-to-arm32.tar.xz` (For ARM64 devices, Termux host, Apple Silicon via Linux VM)
+
+            *Generated automatically via GitHub Actions CI/CD Pipeline.*
+          files: release-assets/*.tar.xz
+          draft: false
+          prerelease: false
