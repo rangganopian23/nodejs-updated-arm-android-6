@@ -1,0 +1,60 @@
+name: Forge Custom Musl Toolchain (ARM64 to ARM32)
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build-toolchain:
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 180
+    env:
+      TARGET: "arm-linux-musleabihf"
+      MUSL_VERSION: "1.2.5"
+      GCC_VERSION: "15.1.0"
+    steps:
+      - run: |
+          sudo apt-get update
+          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y build-essential curl wget git python3 rsync patch tar texinfo bison flex gawk bzip2
+      
+      - run: git clone https://github.com/richfelker/musl-cross-make.git mcm
+
+      - working-directory: mcm
+        run: |
+          cat << 'EOF' > config.mak
+          TARGET = arm-linux-musleabihf
+          MUSL_VER = 1.2.5
+          GCC_VER = 15.1.0
+          OUTPUT = /opt/custom-toolchain
+          COMMON_CONFIG += CFLAGS="-g0 -Os" CXXFLAGS="-g0 -Os" LDFLAGS="-s"
+          GCC_CONFIG += --with-arch=armv7-a --with-float=hard --with-fpu=neon-vfpv4
+          EOF
+
+      - working-directory: mcm
+        run: |
+          make extract_all
+          
+          MUSL_SRC_DIR=$(find . -maxdepth 1 -type d -name "musl-*" | head -n 1)
+          
+          if [ -n "$MUSL_SRC_DIR" ]; then
+            sed -i 's|"/etc/resolv.conf"|"/data/data/com.termux/files/usr/etc/resolv.conf"|g' "$MUSL_SRC_DIR/src/network/resolvconf.c"
+            sed -i 's|"/etc/hosts"|"/data/data/com.termux/files/usr/etc/hosts"|g' "$MUSL_SRC_DIR/src/network/lookup_name.c"
+          fi
+
+      - working-directory: mcm
+        run: |
+          make -s -j4 > /dev/null
+          sudo make install
+
+      - run: |
+          cd /opt
+          tar -cJf custom-arm-toolchain-x86_64.tar.xz custom-toolchain
+
+      - uses: softprops/action-gh-release@v2
+        with:
+          tag_name: toolchain-v1.${{ github.run_number }}
+          name: "Custom Musl Toolchain (ARM64 to ARM32) Build #${{ github.run_number }}"
+          files: /opt/custom-arm-toolchain.tar.xz
+          draft: false
+          prerelease: false
