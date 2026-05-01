@@ -1,4 +1,4 @@
-name: Build Node.js Portable Dynamic (Musl)
+name: Build Node.js Portable Dynamic (Musl) on Ubuntu x86_64
 on:
   workflow_dispatch:
 jobs:
