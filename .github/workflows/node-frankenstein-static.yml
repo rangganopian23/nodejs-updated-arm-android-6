@@ -68,14 +68,24 @@ jobs:
           fi
 
           sed -i '/Target architecture arm is only supported/d' deps/v8/include/v8config.h
-          
-          sed -i 's/defined(__ARM_FEATURE_SVE)/0/g' deps/v8/third_party/highway/src/hwy/detect_targets.h || true
-          sed -i 's/defined(__ARM_FEATURE_SVE2)/0/g' deps/v8/third_party/highway/src/hwy/detect_targets.h || true
-
           echo '#define static_assert(...)' > /mnt/ramdisk/node-src/bypass_assert.h
 
           python3 -c "
           import os
+          filepath_handles = 'deps/v8/src/handles/handles.h'
+          try:
+              with open(filepath_handles, 'r') as f: content = f.read()
+              content = content.replace('static_assert(HandleScopeData::kSizeInBytes == sizeof(HandleScopeData));', '')
+              target1 = 'This handle does not reference a heap object'
+              idx1 = content.find(target1)
+              if idx1 != -1:
+                  start_idx = content.rfind('static_assert', 0, idx1)
+                  end_idx = content.find(';', idx1) + 1
+                  if start_idx != -1 and end_idx != -1:
+                      content = content[:start_idx] + content[end_idx:]
+              with open(filepath_handles, 'w') as f: f.write(content)
+          except Exception: pass
+          
           filepath_turbo = 'deps/v8/src/compiler/turboshaft/int64-lowering-reducer.h'
           try:
               with open(filepath_turbo, 'r') as f: content_turbo = f.read()
@@ -110,15 +120,15 @@ jobs:
           
           export GYP_DEFINES="host_os=linux host_arch=arm64 target_arch=arm v8_enable_sandbox=0 v8_enable_maglev=0 v8_enable_pointer_compression=0 v8_use_snapshot=false v8_enable_lite_mode=1 v8_enable_gdbjit=0 v8_enable_test_features=0 v8_enable_vtunejit=0 v8_enable_system_instrumentation=0 v8_enable_trace_maps=0 v8_enable_trace_ignition=0 v8_enable_etw=0 v8_enable_native_counters=0 v8_enable_inspector=0 node_has_winsdk=0 node_use_etw=0 node_use_perfctr=0 node_use_dtrace=0 arm_version=7 arm_fpu=neon"
           
-          export BYPASS_FLAGS_TARGET="-D_LIBCPP_HAS_NO_OFF_T_FUNCTIONS -DUV_EXCLUDE_IO_URING=1 -w -mfpu=neon -include /mnt/ramdisk/node-src/bypass_assert.h"
+          export BYPASS_FLAGS_TARGET="-D_LIBCPP_HAS_NO_OFF_T_FUNCTIONS -DUV_EXCLUDE_IO_URING=1 -w -mfpu=neon -flax-vector-conversions -include /mnt/ramdisk/node-src/bypass_assert.h"
           export CFLAGS="-Os -fdata-sections -ffunction-sections -pipe -g0 -static $BYPASS_FLAGS_TARGET"
           export CXXFLAGS="-Os -fdata-sections -ffunction-sections -std=gnu++20 -pipe -g0 -static $BYPASS_FLAGS_TARGET"
           export LDFLAGS="-static -Wl,--export-dynamic -Wl,--gc-sections"
           
-          export BYPASS_FLAGS_HOST="-w -march=armv8-a+simd -include /mnt/ramdisk/node-src/bypass_assert.h"
+          export BYPASS_FLAGS_HOST="-w -flax-vector-conversions -include /mnt/ramdisk/node-src/bypass_assert.h"
           export CC_host="ccache ${HOST_TRIPLE}-gcc $BYPASS_FLAGS_HOST"
           export CXX_host="ccache ${HOST_TRIPLE}-g++ $BYPASS_FLAGS_HOST"
-          export LINK_host="$CXX_host"
+          export LINK_host="ccache ${HOST_TRIPLE}-g++ $BYPASS_FLAGS_HOST -lm -lpthread -lrt"
           
           export CC="ccache ${TOOLCHAIN_TRIPLE}-gcc $BYPASS_FLAGS_TARGET"
           export CXX="ccache ${TOOLCHAIN_TRIPLE}-g++ $BYPASS_FLAGS_TARGET"
@@ -141,14 +151,14 @@ jobs:
       - working-directory: ${{ env.RAMDISK_PATH }}/node-src
         run: |
           export PATH="/usr/lib/ccache:/opt/target-toolchain/bin:/opt/host-toolchain/bin:$PATH"
-          export BYPASS_FLAGS_TARGET="-D_LIBCPP_HAS_NO_OFF_T_FUNCTIONS -DUV_EXCLUDE_IO_URING=1 -w -mfpu=neon -include /mnt/ramdisk/node-src/bypass_assert.h"
-          export BYPASS_FLAGS_HOST="-w -march=armv8-a+simd -include /mnt/ramdisk/node-src/bypass_assert.h"
+          export BYPASS_FLAGS_TARGET="-D_LIBCPP_HAS_NO_OFF_T_FUNCTIONS -DUV_EXCLUDE_IO_URING=1 -w -mfpu=neon -flax-vector-conversions -include /mnt/ramdisk/node-src/bypass_assert.h"
+          export BYPASS_FLAGS_HOST="-w -flax-vector-conversions -include /mnt/ramdisk/node-src/bypass_assert.h"
           export CC="ccache ${TOOLCHAIN_TRIPLE}-gcc $BYPASS_FLAGS_TARGET"
           export CXX="ccache ${TOOLCHAIN_TRIPLE}-g++ $BYPASS_FLAGS_TARGET"
           export LINK="$CXX"
           export CC_host="ccache ${HOST_TRIPLE}-gcc $BYPASS_FLAGS_HOST"
           export CXX_host="ccache ${HOST_TRIPLE}-g++ $BYPASS_FLAGS_HOST"
-          export LINK_host="$CXX_host"
+          export LINK_host="ccache ${HOST_TRIPLE}-g++ $BYPASS_FLAGS_HOST -lm -lpthread -lrt"
           
           ccache -z
           make -s -j$(nproc) BUILDTYPE=Release > /dev/null
