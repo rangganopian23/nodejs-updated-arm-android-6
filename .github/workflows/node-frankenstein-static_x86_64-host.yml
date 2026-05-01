@@ -42,7 +42,7 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh release download toolchain-v1.2 -p "custom-arm-toolchain-x86_64.tar.xz" -R ${{ github.repository }} -O ${{ env.CACHE_DL_DIR }}/toolchain.tar.xz
+          gh release download -p "musl-toolchain-x86_64-to-arm32.tar.xz" -R ${{ github.repository }} -O ${{ env.CACHE_DL_DIR }}/toolchain.tar.xz
           wget -qO ${{ env.CACHE_DL_DIR }}/node.tar.gz https://nodejs.org/dist/${NODE_VERSION}/node-${NODE_VERSION}.tar.gz
 
       - working-directory: ${{ env.RAMDISK_PATH }}
