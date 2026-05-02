@@ -1,9 +1,9 @@
-name: Build Node.js Portable Dynamic (Musl) on Ubuntu x86_64
+name: Build Node.js Dynamic (Musl) on Ubuntu x86_64
 on:
   workflow_dispatch:
 jobs:
   build-node-musl:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-22.04
     timeout-minutes: 360
     env:
       NODE_VERSION: "v24.15.0"
@@ -28,10 +28,9 @@ jobs:
       - uses: actions/cache@v4
         with:
           path: ${{ env.CCACHE_DIR }}
-          key: ${{ runner.os }}-ccache-node-portable-dynamic-x86_64-${{ github.sha }}
+          key: ${{ runner.os }}-ccache-node-dynamic-x86_64-${{ github.sha }}
           restore-keys: |
-            ${{ runner.os }}-ccache-node-portable-dynamic-x86_64-
-            ${{ runner.os }}-node-portable-dynamic-cache-
+            ${{ runner.os }}-ccache-node-dynamic-x86_64-
 
       - id: cache-downloads
         uses: actions/cache@v4
@@ -49,6 +48,7 @@ jobs:
       - working-directory: ${{ env.RAMDISK_PATH }}
         run: |
           sudo tar -xf ${{ env.CACHE_DL_DIR }}/toolchain.tar.xz -C /opt
+          sudo mv /opt/musl-toolchain /opt/target-toolchain
           tar -xf ${{ env.CACHE_DL_DIR }}/node.tar.gz
           mv node-${NODE_VERSION} node-src
 
@@ -62,9 +62,11 @@ jobs:
             find deps/openssl -type f -name "*.c" -exec grep -l "OPENSSL_RAND_SEED_GETRANDOM" {} + | xargs -I {} sed -i 's/define OPENSSL_RAND_SEED_GETRANDOM/undef OPENSSL_RAND_SEED_GETRANDOM/g' {}
             find deps/openssl -type f -name "*.c" -exec grep -l "OPENSSL_RAND_SEED_OS" {} + | xargs -I {} sed -i 's/define OPENSSL_RAND_SEED_OS/define OPENSSL_RAND_SEED_DEVRANDOM/g' {}
           fi
-          
+
           python3 -c "
           import sys
+          import os
+          
           filepath_handles = 'deps/v8/src/handles/handles.h'
           try:
               with open(filepath_handles, 'r') as f: content = f.read()
@@ -89,29 +91,27 @@ jobs:
 
       - working-directory: ${{ env.RAMDISK_PATH }}/node-src
         run: |
-          export PATH="/usr/lib/ccache:/opt/musl-toolchain/bin:$PATH"
-          export AR="${TOOLCHAIN_TRIPLE}-ar"
-          export NM="${TOOLCHAIN_TRIPLE}-nm"
-          export STRIP="${TOOLCHAIN_TRIPLE}-strip"
+          export PATH="/usr/lib/ccache:/opt/target-toolchain/bin:$PATH"
+          export CC="ccache /opt/target-toolchain/bin/${TOOLCHAIN_TRIPLE}-gcc"
+          export CXX="ccache /opt/target-toolchain/bin/${TOOLCHAIN_TRIPLE}-g++"
+          export AR="/opt/target-toolchain/bin/${TOOLCHAIN_TRIPLE}-ar"
+          export NM="/opt/target-toolchain/bin/${TOOLCHAIN_TRIPLE}-nm"
+          export STRIP="/opt/target-toolchain/bin/${TOOLCHAIN_TRIPLE}-strip"
+          export LINK="$CXX" 
+          
+          export CC_host="ccache gcc -m32 -w"
+          export CXX_host="ccache g++ -m32 -w"
+          export LINK_host="ccache g++ -m32 -w"
           export AR_host="ar"
           export NM_host="nm"
-          export host_os="linux"
           
+          export host_os="linux"
           export GYP_DEFINES="host_os=linux host_arch=ia32 target_arch=arm v8_enable_sandbox=0 v8_enable_maglev=0 v8_enable_pointer_compression=0 v8_use_snapshot=false v8_enable_lite_mode=1 v8_enable_gdbjit=0 v8_enable_test_features=0 v8_enable_vtunejit=0 v8_enable_system_instrumentation=0 v8_enable_trace_maps=0 v8_enable_trace_ignition=0 v8_enable_etw=0 v8_enable_native_counters=0 v8_enable_inspector=0 node_has_winsdk=0 node_use_etw=0 node_use_perfctr=0 node_use_dtrace=0"
           
-          export BYPASS_FLAGS_TARGET="-D_LIBCPP_HAS_NO_OFF_T_FUNCTIONS -DUV_EXCLUDE_IO_URING=1 -w"
-          export CFLAGS="-Os -fdata-sections -ffunction-sections -pipe -g0 $BYPASS_FLAGS_TARGET"
-          export CXXFLAGS="-Os -fdata-sections -ffunction-sections -std=gnu++20 -pipe -g0 $BYPASS_FLAGS_TARGET"
-          export LDFLAGS="-Wl,-Bstatic -lstdc++ -lgcc -lgcc_eh -Wl,-Bdynamic -Wl,--export-dynamic -Wl,--gc-sections"
-          
-          export BYPASS_FLAGS_HOST="-w"
-          export CC_host="ccache gcc -m32 $BYPASS_FLAGS_HOST"
-          export CXX_host="ccache g++ -m32 $BYPASS_FLAGS_HOST"
-          export LINK_host="$CXX_host"
-          
-          export CC="ccache ${TOOLCHAIN_TRIPLE}-gcc $BYPASS_FLAGS_TARGET"
-          export CXX="ccache ${TOOLCHAIN_TRIPLE}-g++ $BYPASS_FLAGS_TARGET"
-          export LINK="$CXX"
+          export BYPASS_FLAGS="-D_LIBCPP_HAS_NO_OFF_T_FUNCTIONS -DUV_EXCLUDE_IO_URING=1 -w"
+          export CFLAGS="-Os -fdata-sections -ffunction-sections -pipe -g0 $BYPASS_FLAGS"
+          export CXXFLAGS="-Os -fdata-sections -ffunction-sections -std=gnu++20 -pipe -g0 $BYPASS_FLAGS"
+          export LDFLAGS="-Wl,--export-dynamic -Wl,--gc-sections"
           
           ./configure \
             --dest-cpu=$TARGET_ARCH \
@@ -128,15 +128,20 @@ jobs:
 
       - working-directory: ${{ env.RAMDISK_PATH }}/node-src
         run: |
-          export PATH="/usr/lib/ccache:/opt/musl-toolchain/bin:$PATH"
-          export BYPASS_FLAGS_TARGET="-D_LIBCPP_HAS_NO_OFF_T_FUNCTIONS -DUV_EXCLUDE_IO_URING=1 -w"
-          export BYPASS_FLAGS_HOST="-w"
-          export CC="ccache ${TOOLCHAIN_TRIPLE}-gcc $BYPASS_FLAGS_TARGET"
-          export CXX="ccache ${TOOLCHAIN_TRIPLE}-g++ $BYPASS_FLAGS_TARGET"
+          export PATH="/usr/lib/ccache:/opt/target-toolchain/bin:$PATH"
+          export BYPASS_FLAGS="-D_LIBCPP_HAS_NO_OFF_T_FUNCTIONS -DUV_EXCLUDE_IO_URING=1 -w"
+          
+          export CC="ccache /opt/target-toolchain/bin/${TOOLCHAIN_TRIPLE}-gcc"
+          export CXX="ccache /opt/target-toolchain/bin/${TOOLCHAIN_TRIPLE}-g++"
           export LINK="$CXX"
-          export CC_host="ccache gcc -m32 $BYPASS_FLAGS_HOST"
-          export CXX_host="ccache g++ -m32 $BYPASS_FLAGS_HOST"
-          export LINK_host="$CXX_host"
+          
+          export CC_host="ccache gcc -m32 -w"
+          export CXX_host="ccache g++ -m32 -w"
+          export LINK_host="ccache g++ -m32 -w"
+          
+          export CFLAGS="-Os -fdata-sections -ffunction-sections -pipe -g0 $BYPASS_FLAGS"
+          export CXXFLAGS="-Os -fdata-sections -ffunction-sections -std=gnu++20 -pipe -g0 $BYPASS_FLAGS"
+          export LDFLAGS="-Wl,--export-dynamic -Wl,--gc-sections"
           
           ccache -z
           make -s -j$(nproc) BUILDTYPE=Release > /dev/null
@@ -144,15 +149,15 @@ jobs:
 
       - working-directory: ${{ env.RAMDISK_PATH }}/node-src
         run: |
-          /opt/musl-toolchain/bin/${TOOLCHAIN_TRIPLE}-strip --strip-all out/Release/node
-          cp /opt/musl-toolchain/${TOOLCHAIN_TRIPLE}/lib/libc.so out/Release/ld-musl-armhf.so.1
-          /opt/musl-toolchain/bin/${TOOLCHAIN_TRIPLE}-strip --strip-all out/Release/ld-musl-armhf.so.1
-          mkdir -p $GITHUB_WORKSPACE/artifact
+          mkdir -p $GITHUB_WORKSPACE/artifact/musl-libs
+          cp -a /opt/target-toolchain/${TOOLCHAIN_TRIPLE}/lib/*.so* $GITHUB_WORKSPACE/artifact/musl-libs/ || true
+          cp -a /opt/target-toolchain/${TOOLCHAIN_TRIPLE}/${TOOLCHAIN_TRIPLE}/lib/*.so* $GITHUB_WORKSPACE/artifact/musl-libs/ || true
+          
+          /opt/target-toolchain/bin/${TOOLCHAIN_TRIPLE}-strip --strip-all out/Release/node
           cp out/Release/node $GITHUB_WORKSPACE/artifact/
-          cp out/Release/ld-musl-armhf.so.1 $GITHUB_WORKSPACE/artifact/
 
       - uses: actions/upload-artifact@v4
         with:
-          name: node-portable-dynami
+          name: node-dynamic
           path: artifact/
           retention-days: 7
