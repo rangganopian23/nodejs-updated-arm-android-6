@@ -43,17 +43,14 @@ jobs:
 
       - working-directory: ${{ env.RAMDISK_PATH }}
         run: |
-          echo "[INFO] Mengunduh Header Node.js v20..."
           wget -q https://nodejs.org/dist/${NODE_VERSION}/node-${NODE_VERSION}.tar.gz
           tar -xf node-${NODE_VERSION}.tar.gz
           mv node-${NODE_VERSION} node-src
 
       - working-directory: ${{ env.RAMDISK_PATH }}
         run: |
-          echo "[INFO] Membuat FAKE HEADERS untuk membutakan Compiler Bionic API 23..."
           mkdir -p fake_headers/sys
           
-          # HACK: Pemalsuan ifaddrs (Jaringan)
           cat << 'EOF' > fake_headers/ifaddrs.h
           #ifndef FAKE_IFADDRS_H
           #define FAKE_IFADDRS_H
@@ -77,7 +74,6 @@ jobs:
           #endif
           EOF
 
-          # HACK: Pemalsuan preadv/pwritev (I/O)
           cat << 'EOF' > fake_headers/sys/uio.h
           #ifndef FAKE_SYS_UIO_H
           #define FAKE_SYS_UIO_H
@@ -114,7 +110,6 @@ jobs:
           #endif
           EOF
           
-          # HACK MUTLAK: Pemalsuan pty.h (Fungsi Kernel forkpty)
           cat << 'EOF' > fake_headers/pty.h
           #ifndef FAKE_PTY_H
           #define FAKE_PTY_H
@@ -132,7 +127,6 @@ jobs:
           #endif
           EOF
           
-          # HACK MUTLAK: Pemalsuan util.h (Beberapa sistem meletakkan forkpty di sini)
           cat << 'EOF' > fake_headers/util.h
           #ifndef FAKE_UTIL_H
           #define FAKE_UTIL_H
@@ -142,16 +136,12 @@ jobs:
 
       - working-directory: ${{ env.RAMDISK_PATH }}
         run: |
-          echo "[INFO] Melakukan Clone Source Code microsoft/node-pty..."
           git clone https://github.com/microsoft/node-pty.git
           cd node-pty
-          
-          echo "[INFO] Menginstal dependensi JS (nan, node-addon-api) TANPA memicu build script bawaan..."
           npm install --ignore-scripts
 
       - working-directory: ${{ env.RAMDISK_PATH }}/node-pty
         run: |
-          echo "[INFO] Menyiapkan senjata kompilator NDK Cross-Compile..."
           export NDK_PATH="/opt/android-ndk"
           export TOOLCHAIN="$NDK_PATH/toolchains/llvm/prebuilt/linux-x86_64"
           
@@ -165,10 +155,10 @@ jobs:
           export CFLAGS="-Os -fPIE $BYPASS_FLAGS"
           export CXXFLAGS="-Os -fPIE -std=c++20 $BYPASS_FLAGS"
           
-          # HACK LINKER: Menutup mata LLVM agar membiarkan forkpty tetap hidup sebagai simbol Undefined
           export LDFLAGS="-shared -fPIE -Wl,--allow-shlib-undefined -Wl,-z,undefs"
           
-          echo "[INFO] MEMICU NODE-GYP SECARA MANUAL (THE HACKER WAY)..."
+          sed -i '/-lutil/d' binding.gyp
+          
           npx node-gyp rebuild \
             --arch=arm \
             --target_arch=arm \
@@ -177,20 +167,14 @@ jobs:
 
       - working-directory: ${{ env.RAMDISK_PATH }}/node-pty
         run: |
-          echo "[INFO] Memverifikasi keberadaan Biner .node..."
           if [ ! -f "build/Release/pty.node" ]; then
-            echo "[ERROR] pty.node GAGAL TERCIPTA! Kompilasi Gagal!"
             exit 1
           fi
           
-          echo "[INFO] BINER BERHASIL DIBUAT! Mengeksekusi Stripping..."
           export STRIP="/opt/android-ndk/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-strip"
           $STRIP --strip-unneeded build/Release/pty.node
           
-          echo "[INFO] Mengemas ke dalam struktur node_modules..."
           mkdir -p ${{ env.RAMDISK_PATH }}/final_package/node_modules/node-pty
-          
-          # Menyalin seluruh source code, package.json, dan folder build yang berisi .node
           cp -r ./* ${{ env.RAMDISK_PATH }}/final_package/node_modules/node-pty/
           
           cd ${{ env.RAMDISK_PATH }}/final_package
