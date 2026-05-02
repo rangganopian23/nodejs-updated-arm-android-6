@@ -43,14 +43,17 @@ jobs:
 
       - working-directory: ${{ env.RAMDISK_PATH }}
         run: |
+          echo "[INFO] Mengunduh Header Node.js v20..."
           wget -q https://nodejs.org/dist/${NODE_VERSION}/node-${NODE_VERSION}.tar.gz
           tar -xf node-${NODE_VERSION}.tar.gz
           mv node-${NODE_VERSION} node-src
 
       - working-directory: ${{ env.RAMDISK_PATH }}
         run: |
+          echo "[INFO] Membuat FAKE HEADERS untuk membutakan Compiler Bionic API 23..."
           mkdir -p fake_headers/sys
           
+          # HACK: Pemalsuan ifaddrs (Jaringan)
           cat << 'EOF' > fake_headers/ifaddrs.h
           #ifndef FAKE_IFADDRS_H
           #define FAKE_IFADDRS_H
@@ -74,6 +77,7 @@ jobs:
           #endif
           EOF
 
+          # HACK: Pemalsuan preadv/pwritev (I/O)
           cat << 'EOF' > fake_headers/sys/uio.h
           #ifndef FAKE_SYS_UIO_H
           #define FAKE_SYS_UIO_H
@@ -110,6 +114,7 @@ jobs:
           #endif
           EOF
           
+          # HACK MUTLAK: Pemalsuan pty.h (Fungsi Kernel forkpty)
           cat << 'EOF' > fake_headers/pty.h
           #ifndef FAKE_PTY_H
           #define FAKE_PTY_H
@@ -127,6 +132,7 @@ jobs:
           #endif
           EOF
           
+          # HACK MUTLAK: Pemalsuan util.h
           cat << 'EOF' > fake_headers/util.h
           #ifndef FAKE_UTIL_H
           #define FAKE_UTIL_H
@@ -136,12 +142,15 @@ jobs:
 
       - working-directory: ${{ env.RAMDISK_PATH }}
         run: |
+          echo "[INFO] Melakukan Clone Source Code microsoft/node-pty..."
           git clone https://github.com/microsoft/node-pty.git
           cd node-pty
+          echo "[INFO] Menginstal dependensi JS TANPA memicu build script bawaan..."
           npm install --ignore-scripts
 
       - working-directory: ${{ env.RAMDISK_PATH }}/node-pty
         run: |
+          echo "[INFO] Menyiapkan senjata kompilator NDK Cross-Compile..."
           export NDK_PATH="/opt/android-ndk"
           export TOOLCHAIN="$NDK_PATH/toolchains/llvm/prebuilt/linux-x86_64"
           
@@ -151,14 +160,23 @@ jobs:
           export NM="$TOOLCHAIN/bin/llvm-nm"
           export LINK="$CXX"
           
+          export npm_config_arch="arm"
+          export npm_config_target_arch="arm"
+          export npm_config_platform="android"
+          export npm_config_nodedir="${{ env.RAMDISK_PATH }}/node-src"
+          
+          # =========================================================================
+          # THE FIX: INJEKSI -fPIC MUTLAK (MENGGANTIKAN -fPIE YANG MEMBAWA MAUT)
+          # =========================================================================
           export BYPASS_FLAGS="-D_LIBCPP_HAS_NO_OFF_T_FUNCTIONS -Dfseeko=fseek -Dftello=ftell -I${{ env.RAMDISK_PATH }}/fake_headers -Wno-everything"
-          export CFLAGS="-Os -fPIE $BYPASS_FLAGS"
-          export CXXFLAGS="-Os -fPIE -std=c++20 $BYPASS_FLAGS"
+          export CFLAGS="-Os -fdata-sections -ffunction-sections -fPIC $BYPASS_FLAGS"
+          export CXXFLAGS="-Os -fdata-sections -ffunction-sections -fPIC -std=c++20 $BYPASS_FLAGS"
+          export LDFLAGS="-shared -fPIC -Wl,--allow-shlib-undefined -Wl,-z,undefs"
           
-          export LDFLAGS="-shared -fPIE -Wl,--allow-shlib-undefined -Wl,-z,undefs"
-          
+          echo "[INFO] Melakukan operasi bedah pada binding.gyp untuk membunuh hantu -lutil..."
           sed -i '/-lutil/d' binding.gyp
           
+          echo "[INFO] MEMICU NODE-GYP SECARA MANUAL (THE HACKER WAY)..."
           npx node-gyp rebuild \
             --arch=arm \
             --target_arch=arm \
@@ -167,14 +185,19 @@ jobs:
 
       - working-directory: ${{ env.RAMDISK_PATH }}/node-pty
         run: |
+          echo "[INFO] Memverifikasi keberadaan Biner Shared Library .node..."
           if [ ! -f "build/Release/pty.node" ]; then
+            echo "[ERROR] KIAMAT ABI KEMBALI TERJADI! File pty.node gagal tercipta!"
             exit 1
           fi
           
+          echo "[INFO] BINER BERHASIL DIBUAT! Mengeksekusi Stripping untuk memperkecil ukuran..."
           export STRIP="/opt/android-ndk/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-strip"
           $STRIP --strip-unneeded build/Release/pty.node
           
+          echo "[INFO] Mengemas ke dalam struktur hierarki node_modules..."
           mkdir -p ${{ env.RAMDISK_PATH }}/final_package/node_modules/node-pty
+          
           cp -r ./* ${{ env.RAMDISK_PATH }}/final_package/node_modules/node-pty/
           
           cd ${{ env.RAMDISK_PATH }}/final_package
