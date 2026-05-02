@@ -30,13 +30,13 @@ jobs:
             archive_name: musl-toolchain-x86_64-to-arm32.tar.xz
             fpu_flag: --with-arch=armv7-a --with-float=hard --with-fpu=neon-vfpv4
 
-          - os: ubuntu-24.04-arm
+          - os: ubuntu-22.04-arm
             host_arch: aarch64
             toolchain_target: arm-linux-musleabihf
             archive_name: musl-toolchain-aarch64-to-arm32.tar.xz
             fpu_flag: --with-arch=armv7-a --with-float=hard --with-fpu=neon-vfpv4
 
-          - os: ubuntu-24.04-arm
+          - os: ubuntu-22.04-arm
             host_arch: aarch64
             toolchain_target: aarch64-linux-musl
             archive_name: host-gcc15-aarch64.tar.xz
