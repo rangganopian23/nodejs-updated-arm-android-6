@@ -1,0 +1,150 @@
+name: Build @lydell/node-pty Prebuilt (Android 6 ARM32)
+on:
+  workflow_dispatch:
+jobs:
+  build-native-addon:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 120
+    env:
+      NODE_VERSION: "v20.20.2"
+      NDK_VERSION: "r26d"
+      API_LEVEL: "23" 
+      TARGET_ARCH: "arm"
+      TARGET_TRIPLE_COMPILER: "armv7a-linux-androideabi" 
+      RAMDISK_PATH: "/mnt/ramdisk"
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node.js Host Environment
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - run: |
+          sudo apt-get update
+          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y python3 make cmake git curl wget xz-utils binutils gcc g++ gcc-multilib g++-multilib lib32stdc++6 pkg-config unzip
+          sudo mkdir -p ${{ env.RAMDISK_PATH }}
+          sudo mount -t tmpfs -o size=8G tmpfs ${{ env.RAMDISK_PATH }}
+          sudo chown -R $USER:$USER ${{ env.RAMDISK_PATH }}
+
+      - id: cache-ndk
+        uses: actions/cache@v4
+        with:
+          path: /opt/android-ndk
+          key: ndk-${{ env.NDK_VERSION }}
+
+      - if: steps.cache-ndk.outputs.cache-hit != 'true'
+        run: |
+          cd /opt
+          sudo wget -q https://dl.google.com/android/repository/android-ndk-${NDK_VERSION}-linux.zip
+          sudo unzip -q android-ndk-${NDK_VERSION}-linux.zip
+          sudo mv android-ndk-${NDK_VERSION} android-ndk
+          sudo rm android-ndk-${NDK_VERSION}-linux.zip
+
+      - working-directory: ${{ env.RAMDISK_PATH }}
+        run: |
+          wget -q https://nodejs.org/dist/${NODE_VERSION}/node-${NODE_VERSION}.tar.gz
+          tar -xf node-${NODE_VERSION}.tar.gz
+          mv node-${NODE_VERSION} node-src
+
+      - working-directory: ${{ env.RAMDISK_PATH }}
+        run: |
+          mkdir -p fake_headers/sys
+          cat << 'EOF' > fake_headers/ifaddrs.h
+          #ifndef FAKE_IFADDRS_H
+          #define FAKE_IFADDRS_H
+          struct ifaddrs {
+              struct ifaddrs  *ifa_next;
+              char            *ifa_name;
+              unsigned int     ifa_flags;
+              struct sockaddr *ifa_addr;
+              struct sockaddr *ifa_netmask;
+              union { struct sockaddr *ifu_broadaddr; struct sockaddr *ifu_dstaddr; } ifa_ifu;
+              void            *ifa_data;
+          };
+          static inline int getifaddrs(struct ifaddrs **ifap) { *ifap = 0; return -1; }
+          static inline void freeifaddrs(struct ifaddrs *ifa) { }
+          #endif
+          EOF
+
+          cat << 'EOF' > fake_headers/sys/uio.h
+          #ifndef FAKE_SYS_UIO_H
+          #define FAKE_SYS_UIO_H
+          #include_next <sys/uio.h>
+          #include <sys/types.h>
+          #include <unistd.h>
+          #include <errno.h>
+          static inline ssize_t preadv(int fd, const struct iovec *iov, int iovcnt, off_t offset) {
+              ssize_t total = 0;
+              for (int i = 0; i < iovcnt; i++) {
+                  ssize_t res = pread(fd, iov[i].iov_base, iov[i].iov_len, offset);
+                  if (res < 0) { if (total == 0) return -1; break; }
+                  total += res; offset += res;
+                  if ((size_t)res < iov[i].iov_len) break;
+              }
+              return total;
+          }
+          static inline ssize_t pwritev(int fd, const struct iovec *iov, int iovcnt, off_t offset) {
+              ssize_t total = 0;
+              for (int i = 0; i < iovcnt; i++) {
+                  ssize_t res = pwrite(fd, iov[i].iov_base, iov[i].iov_len, offset);
+                  if (res < 0) { if (total == 0) return -1; break; }
+                  total += res; offset += res;
+                  if ((size_t)res < iov[i].iov_len) break;
+              }
+              return total;
+          }
+          #endif
+          EOF
+
+      - working-directory: ${{ env.RAMDISK_PATH }}
+        run: |
+          mkdir -p workspace
+          cd workspace
+          cat << 'EOF' > package.json
+          {
+            "name": "gemini-cli-native-env",
+            "version": "1.0.0",
+            "description": "Prebuilt native addon container",
+            "dependencies": {}
+          }
+          EOF
+
+      - working-directory: ${{ env.RAMDISK_PATH }}/workspace
+        run: |
+          export NDK_PATH="/opt/android-ndk"
+          export TOOLCHAIN="$NDK_PATH/toolchains/llvm/prebuilt/linux-x86_64"
+          
+          export CC="$TOOLCHAIN/bin/${TARGET_TRIPLE_COMPILER}${API_LEVEL}-clang"
+          export CXX="$TOOLCHAIN/bin/${TARGET_TRIPLE_COMPILER}${API_LEVEL}-clang++"
+          export AR="$TOOLCHAIN/bin/llvm-ar"
+          export NM="$TOOLCHAIN/bin/llvm-nm"
+          export RANLIB="$TOOLCHAIN/bin/llvm-ranlib"
+          export STRIP="$TOOLCHAIN/bin/llvm-strip"
+          export LINK="$CXX"
+          
+          export npm_config_arch="arm"
+          export npm_config_target_arch="arm"
+          export npm_config_os="android"
+          export npm_config_nodedir="${{ env.RAMDISK_PATH }}/node-src"
+          
+          export BYPASS_FLAGS="-D_LIBCPP_HAS_NO_OFF_T_FUNCTIONS -Dfseeko=fseek -Dftello=ftell -I${{ env.RAMDISK_PATH }}/fake_headers -Wno-everything"
+          export CFLAGS="-Os -fdata-sections -ffunction-sections -fPIE $BYPASS_FLAGS"
+          export CXXFLAGS="-Os -fdata-sections -ffunction-sections -fPIE -std=c++20 $BYPASS_FLAGS"
+          
+          export LDFLAGS="-shared -fPIE -Wl,--allow-shlib-undefined -Wl,-z,undefs"
+          
+          npm install @lydell/node-pty --build-from-source --foreground-scripts --verbose
+
+      - working-directory: ${{ env.RAMDISK_PATH }}/workspace
+        run: |
+          export STRIP="/opt/android-ndk/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-strip"
+          find node_modules -name "*.node" -exec $STRIP --strip-unneeded {} \;
+          
+          tar -czf node_modules_android6_arm.tar.gz node_modules/
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: prebuilt-node-pty-android6-arm
+          path: ${{ env.RAMDISK_PATH }}/workspace/node_modules_android6_arm.tar.gz
+          retention-days: 7
