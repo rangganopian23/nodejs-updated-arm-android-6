@@ -3,7 +3,7 @@ on:
   workflow_dispatch:
 jobs:
   build-node-musl:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-22.04
     timeout-minutes: 360
     env:
       NODE_VERSION: "v24.15.0"
@@ -48,7 +48,6 @@ jobs:
       - working-directory: ${{ env.RAMDISK_PATH }}
         run: |
           sudo tar -xf ${{ env.CACHE_DL_DIR }}/toolchain.tar.xz -C /opt
-          sudo mv /opt/musl-toolchain /opt/target-toolchain
           tar -xf ${{ env.CACHE_DL_DIR }}/node.tar.gz
           mv node-${NODE_VERSION} node-src
 
@@ -102,38 +101,33 @@ jobs:
 
       - working-directory: ${{ env.RAMDISK_PATH }}/node-src
         run: |
-          export PATH="/usr/lib/ccache:/opt/target-toolchain/bin:$PATH"
-          export AR="/opt/target-toolchain/bin/${TOOLCHAIN_TRIPLE}-ar"
-          export NM="/opt/target-toolchain/bin/${TOOLCHAIN_TRIPLE}-nm"
-          export STRIP="/opt/target-toolchain/bin/${TOOLCHAIN_TRIPLE}-strip"
+          export PATH="/usr/lib/ccache:/opt/musl-toolchain/bin:$PATH"
+          export CC="ccache arm-linux-musleabihf-gcc"
+          export CXX="ccache arm-linux-musleabihf-g++"
+          export AR="arm-linux-musleabihf-ar"
+          export NM="arm-linux-musleabihf-nm"
+          export STRIP="arm-linux-musleabihf-strip"
+          export LINK="$CXX" 
           
+          export CC_host="ccache gcc -m32 -w"
+          export CXX_host="ccache g++ -m32 -w"
+          export LINK_host="ccache g++ -m32 -w"
           export AR_host="ar"
           export NM_host="nm"
-          export host_os="linux"
           
+          export host_os="linux"
           export GYP_DEFINES="host_os=linux host_arch=ia32 target_arch=arm v8_enable_sandbox=0 v8_enable_maglev=0 v8_enable_pointer_compression=0 v8_use_snapshot=false v8_enable_lite_mode=1 v8_enable_gdbjit=0 v8_enable_test_features=0 v8_enable_vtunejit=0 v8_enable_system_instrumentation=0 v8_enable_trace_maps=0 v8_enable_trace_ignition=0 v8_enable_etw=0 v8_enable_native_counters=0 v8_enable_inspector=0 node_has_winsdk=0 node_use_etw=0 node_use_perfctr=0 node_use_dtrace=0"
           
           export BYPASS_FLAGS="-D_LIBCPP_HAS_NO_OFF_T_FUNCTIONS -DUV_EXCLUDE_IO_URING=1 -w"
-          export CFLAGS="-Os -fdata-sections -ffunction-sections -pipe -g0 $BYPASS_FLAGS"
-          export CXXFLAGS="-Os -fdata-sections -ffunction-sections -std=gnu++20 -pipe -g0 $BYPASS_FLAGS"
-          export LDFLAGS="-Wl,--export-dynamic -Wl,--gc-sections"
-          
-          export CFLAGS_host="-w"
-          export CXXFLAGS_host="-w"
-          export LDFLAGS_host=""
-          
-          export CC_host="ccache gcc -m32 $CFLAGS_host"
-          export CXX_host="ccache g++ -m32 $CXXFLAGS_host"
-          export LINK_host="ccache g++ -m32 $LDFLAGS_host"
-          
-          export CC="ccache /opt/target-toolchain/bin/${TOOLCHAIN_TRIPLE}-gcc -static $BYPASS_FLAGS"
-          export CXX="ccache /opt/target-toolchain/bin/${TOOLCHAIN_TRIPLE}-g++ -static $BYPASS_FLAGS"
-          export LINK="$CXX"
+          export CFLAGS="-Os -fdata-sections -ffunction-sections -pipe -g0 -static $BYPASS_FLAGS"
+          export CXXFLAGS="-Os -fdata-sections -ffunction-sections -std=gnu++20 -pipe -g0 -static $BYPASS_FLAGS"
+          export LDFLAGS="-static -Wl,--gc-sections"
           
           ./configure \
             --dest-cpu=$TARGET_ARCH \
             --dest-os=linux \
             --cross-compiling \
+            --fully-static \
             --with-intl=small-icu \
             --without-npm \
             --without-corepack \
@@ -145,20 +139,20 @@ jobs:
 
       - working-directory: ${{ env.RAMDISK_PATH }}/node-src
         run: |
-          export PATH="/usr/lib/ccache:/opt/target-toolchain/bin:$PATH"
+          export PATH="/usr/lib/ccache:/opt/musl-toolchain/bin:$PATH"
           export BYPASS_FLAGS="-D_LIBCPP_HAS_NO_OFF_T_FUNCTIONS -DUV_EXCLUDE_IO_URING=1 -w"
           
-          export CFLAGS_host="-w"
-          export CXXFLAGS_host="-w"
-          export LDFLAGS_host=""
-          
-          export CC_host="ccache gcc -m32 $CFLAGS_host"
-          export CXX_host="ccache g++ -m32 $CXXFLAGS_host"
-          export LINK_host="ccache g++ -m32 $LDFLAGS_host"
-          
-          export CC="ccache /opt/target-toolchain/bin/${TOOLCHAIN_TRIPLE}-gcc -static $BYPASS_FLAGS"
-          export CXX="ccache /opt/target-toolchain/bin/${TOOLCHAIN_TRIPLE}-g++ -static $BYPASS_FLAGS"
+          export CC="ccache arm-linux-musleabihf-gcc"
+          export CXX="ccache arm-linux-musleabihf-g++"
           export LINK="$CXX"
+          
+          export CC_host="ccache gcc -m32 -w"
+          export CXX_host="ccache g++ -m32 -w"
+          export LINK_host="ccache g++ -m32 -w"
+          
+          export CFLAGS="-Os -fdata-sections -ffunction-sections -pipe -g0 -static $BYPASS_FLAGS"
+          export CXXFLAGS="-Os -fdata-sections -ffunction-sections -std=gnu++20 -pipe -g0 -static $BYPASS_FLAGS"
+          export LDFLAGS="-static -Wl,--gc-sections"
           
           ccache -z
           make -s -j$(nproc) BUILDTYPE=Release > /dev/null
@@ -166,7 +160,7 @@ jobs:
 
       - working-directory: ${{ env.RAMDISK_PATH }}/node-src
         run: |
-          /opt/target-toolchain/bin/${TOOLCHAIN_TRIPLE}-strip --strip-all out/Release/node
+          /opt/musl-toolchain/bin/${TOOLCHAIN_TRIPLE}-strip --strip-all out/Release/node
           mkdir -p $GITHUB_WORKSPACE/artifact
           cp out/Release/node $GITHUB_WORKSPACE/artifact/
 
