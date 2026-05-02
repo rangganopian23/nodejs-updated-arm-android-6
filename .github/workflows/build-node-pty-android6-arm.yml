@@ -1,8 +1,8 @@
-name: Build @lydell/node-pty Prebuilt (Android 6 ARM32)
+name: Build Prebuilt @lydell/node-pty (NDK API 23 ARM32)
 on:
   workflow_dispatch:
 jobs:
-  build-native-addon:
+  build-native-pty:
     runs-on: ubuntu-22.04
     timeout-minutes: 120
     env:
@@ -15,7 +15,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Setup Node.js Host Environment
+      - name: Setup Node.js Host
         uses: actions/setup-node@v4
         with:
           node-version: '20'
@@ -43,13 +43,17 @@ jobs:
 
       - working-directory: ${{ env.RAMDISK_PATH }}
         run: |
+          echo "[INFO] Mengunduh Header Node.js v20..."
           wget -q https://nodejs.org/dist/${NODE_VERSION}/node-${NODE_VERSION}.tar.gz
           tar -xf node-${NODE_VERSION}.tar.gz
           mv node-${NODE_VERSION} node-src
 
       - working-directory: ${{ env.RAMDISK_PATH }}
         run: |
+          echo "[INFO] Membuat FAKE HEADERS untuk membutakan Compiler Bionic API 23..."
           mkdir -p fake_headers/sys
+          
+          # HACK: Pemalsuan ifaddrs (Jaringan)
           cat << 'EOF' > fake_headers/ifaddrs.h
           #ifndef FAKE_IFADDRS_H
           #define FAKE_IFADDRS_H
@@ -62,11 +66,18 @@ jobs:
               union { struct sockaddr *ifu_broadaddr; struct sockaddr *ifu_dstaddr; } ifa_ifu;
               void            *ifa_data;
           };
+          #ifdef __cplusplus
+          extern "C" {
+          #endif
           static inline int getifaddrs(struct ifaddrs **ifap) { *ifap = 0; return -1; }
           static inline void freeifaddrs(struct ifaddrs *ifa) { }
+          #ifdef __cplusplus
+          }
+          #endif
           #endif
           EOF
 
+          # HACK: Pemalsuan preadv/pwritev (I/O)
           cat << 'EOF' > fake_headers/sys/uio.h
           #ifndef FAKE_SYS_UIO_H
           #define FAKE_SYS_UIO_H
@@ -74,6 +85,9 @@ jobs:
           #include <sys/types.h>
           #include <unistd.h>
           #include <errno.h>
+          #ifdef __cplusplus
+          extern "C" {
+          #endif
           static inline ssize_t preadv(int fd, const struct iovec *iov, int iovcnt, off_t offset) {
               ssize_t total = 0;
               for (int i = 0; i < iovcnt; i++) {
@@ -94,24 +108,50 @@ jobs:
               }
               return total;
           }
+          #ifdef __cplusplus
+          }
+          #endif
+          #endif
+          EOF
+          
+          # HACK MUTLAK: Pemalsuan pty.h (Fungsi Kernel forkpty)
+          cat << 'EOF' > fake_headers/pty.h
+          #ifndef FAKE_PTY_H
+          #define FAKE_PTY_H
+          #include <termios.h>
+          #include <sys/ioctl.h>
+          #include <unistd.h>
+          #ifdef __cplusplus
+          extern "C" {
+          #endif
+          int openpty(int *amaster, int *aslave, char *name, const struct termios *termp, const struct winsize *winp);
+          pid_t forkpty(int *amaster, char *name, const struct termios *termp, const struct winsize *winp);
+          #ifdef __cplusplus
+          }
+          #endif
+          #endif
+          EOF
+          
+          # HACK MUTLAK: Pemalsuan util.h (Beberapa sistem meletakkan forkpty di sini)
+          cat << 'EOF' > fake_headers/util.h
+          #ifndef FAKE_UTIL_H
+          #define FAKE_UTIL_H
+          #include "pty.h"
           #endif
           EOF
 
       - working-directory: ${{ env.RAMDISK_PATH }}
         run: |
-          mkdir -p workspace
-          cd workspace
-          cat << 'EOF' > package.json
-          {
-            "name": "gemini-cli-native-env",
-            "version": "1.0.0",
-            "description": "Prebuilt native addon container",
-            "dependencies": {}
-          }
-          EOF
+          echo "[INFO] Melakukan Clone Source Code @lydell/node-pty..."
+          git clone https://github.com/lydell/node-pty.git
+          cd node-pty
+          
+          echo "[INFO] Menginstal dependensi JS (nan, node-addon-api) TANPA memicu build script bawaan..."
+          npm install --ignore-scripts
 
-      - working-directory: ${{ env.RAMDISK_PATH }}/workspace
+      - working-directory: ${{ env.RAMDISK_PATH }}/node-pty
         run: |
+          echo "[INFO] Menyiapkan senjata kompilator NDK Cross-Compile..."
           export NDK_PATH="/opt/android-ndk"
           export TOOLCHAIN="$NDK_PATH/toolchains/llvm/prebuilt/linux-x86_64"
           
@@ -119,32 +159,45 @@ jobs:
           export CXX="$TOOLCHAIN/bin/${TARGET_TRIPLE_COMPILER}${API_LEVEL}-clang++"
           export AR="$TOOLCHAIN/bin/llvm-ar"
           export NM="$TOOLCHAIN/bin/llvm-nm"
-          export RANLIB="$TOOLCHAIN/bin/llvm-ranlib"
-          export STRIP="$TOOLCHAIN/bin/llvm-strip"
           export LINK="$CXX"
           
-          export npm_config_arch="arm"
-          export npm_config_target_arch="arm"
-          export npm_config_os="android"
-          export npm_config_nodedir="${{ env.RAMDISK_PATH }}/node-src"
-          
           export BYPASS_FLAGS="-D_LIBCPP_HAS_NO_OFF_T_FUNCTIONS -Dfseeko=fseek -Dftello=ftell -I${{ env.RAMDISK_PATH }}/fake_headers -Wno-everything"
-          export CFLAGS="-Os -fdata-sections -ffunction-sections -fPIE $BYPASS_FLAGS"
-          export CXXFLAGS="-Os -fdata-sections -ffunction-sections -fPIE -std=c++20 $BYPASS_FLAGS"
+          export CFLAGS="-Os -fPIE $BYPASS_FLAGS"
+          export CXXFLAGS="-Os -fPIE -std=c++20 $BYPASS_FLAGS"
           
+          # HACK LINKER: Menutup mata LLVM agar membiarkan forkpty tetap hidup sebagai simbol Undefined
           export LDFLAGS="-shared -fPIE -Wl,--allow-shlib-undefined -Wl,-z,undefs"
           
-          npm install @lydell/node-pty --build-from-source --foreground-scripts --verbose
+          echo "[INFO] MEMICU NODE-GYP SECARA MANUAL (THE HACKER WAY)..."
+          npx node-gyp rebuild \
+            --arch=arm \
+            --target_arch=arm \
+            --nodedir=${{ env.RAMDISK_PATH }}/node-src \
+            --verbose
 
-      - working-directory: ${{ env.RAMDISK_PATH }}/workspace
+      - working-directory: ${{ env.RAMDISK_PATH }}/node-pty
         run: |
-          export STRIP="/opt/android-ndk/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-strip"
-          find node_modules -name "*.node" -exec $STRIP --strip-unneeded {} \;
+          echo "[INFO] Memverifikasi keberadaan Biner .node..."
+          if [ ! -f "build/Release/pty.node" ]; then
+            echo "[ERROR] pty.node GAGAL TERCIPTA! Kompilasi Gagal!"
+            exit 1
+          fi
           
-          tar -czf node_modules_android6_arm.tar.gz node_modules/
+          echo "[INFO] BINER BERHASIL DIBUAT! Mengeksekusi Stripping..."
+          export STRIP="/opt/android-ndk/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-strip"
+          $STRIP --strip-unneeded build/Release/pty.node
+          
+          echo "[INFO] Mengemas ke dalam struktur node_modules..."
+          mkdir -p ${{ env.RAMDISK_PATH }}/final_package/node_modules/@lydell/node-pty
+          
+          # Menyalin seluruh source code, package.json, dan folder build yang berisi .node
+          cp -r ./* ${{ env.RAMDISK_PATH }}/final_package/node_modules/@lydell/node-pty/
+          
+          cd ${{ env.RAMDISK_PATH }}/final_package
+          tar -czf prebuilt_node_pty_arm32.tar.gz node_modules/
 
       - uses: actions/upload-artifact@v4
         with:
-          name: prebuilt-node-pty-android6-arm
-          path: ${{ env.RAMDISK_PATH }}/workspace/node_modules_android6_arm.tar.gz
+          name: prebuilt-lydell-node-pty-android6
+          path: ${{ env.RAMDISK_PATH }}/final_package/prebuilt_node_pty_arm32.tar.gz
           retention-days: 7
