@@ -126,6 +126,13 @@ jobs:
               content_wasm = re.sub(r'(offset_reg,\s*)uint32_t', r'\1uintptr_t', content_wasm)
               with open(filepath_wasm, 'w') as f: f.write(content_wasm)
           except Exception: pass
+
+          filepath_bitfield = 'deps/v8/src/base/bit-field.h'
+          try:
+              with open(filepath_bitfield, 'r') as f: content_bf = f.read()
+              content_bf = content_bf.replace('((U{1} << kShift) << kSize) - (U{1} << kShift)', '((static_cast<uint64_t>(1) << kShift) << kSize) - (static_cast<uint64_t>(1) << kShift)')
+              with open(filepath_bitfield, 'w') as f: f.write(content_bf)
+          except Exception: pass
           "
 
       - working-directory: ${{ env.RAMDISK_PATH }}/node-src
