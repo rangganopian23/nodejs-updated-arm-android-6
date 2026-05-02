@@ -175,6 +175,6 @@ jobs:
 
       - uses: actions/upload-artifact@v4
         with:
-          name: node-frankenstein-static-x86_64
+          name: node-frankenstein-static
           path: artifact/
           retention-days: 7
