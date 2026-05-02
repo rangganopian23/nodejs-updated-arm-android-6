@@ -1,8 +1,8 @@
-name: Build @lydell/node-pty Prebuilt (Android 6 ARM32)
+name: Build Prebuilt node-pty & keytar (NDK API 23 ARM32)
 on:
   workflow_dispatch:
 jobs:
-  build-native-addon:
+  build-native-addons:
     runs-on: ubuntu-22.04
     timeout-minutes: 120
     env:
@@ -15,17 +15,23 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Setup Node.js Host Environment
+      - name: Setup Node.js Host
         uses: actions/setup-node@v4
         with:
           node-version: '20'
 
-      - run: |
+      - name: Install NDK & The Libsecret Heist Dependencies
+        run: |
+          # Menambahkan arsitektur ARM32 ke Ubuntu Host untuk mencuri Header libsecret & glib
+          sudo dpkg --add-architecture armhf
           sudo apt-get update
-          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y python3 make cmake git curl wget xz-utils binutils gcc g++ gcc-multilib g++-multilib lib32stdc++6 pkg-config unzip
+          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y python3 make cmake git curl wget xz-utils binutils gcc g++ pkg-config unzip \
+            libsecret-1-dev:armhf libglib2.0-dev:armhf
+          
           sudo mkdir -p ${{ env.RAMDISK_PATH }}
           sudo mount -t tmpfs -o size=8G tmpfs ${{ env.RAMDISK_PATH }}
           sudo chown -R $USER:$USER ${{ env.RAMDISK_PATH }}
+
       - id: cache-ndk
         uses: actions/cache@v4
         with:
@@ -39,30 +45,39 @@ jobs:
           sudo unzip -q android-ndk-${NDK_VERSION}-linux.zip
           sudo mv android-ndk-${NDK_VERSION} android-ndk
           sudo rm android-ndk-${NDK_VERSION}-linux.zip
+
       - working-directory: ${{ env.RAMDISK_PATH }}
         run: |
+          echo "[INFO] Mengunduh Header Node.js v20..."
           wget -q https://nodejs.org/dist/${NODE_VERSION}/node-${NODE_VERSION}.tar.gz
           tar -xf node-${NODE_VERSION}.tar.gz
           mv node-${NODE_VERSION} node-src
+
       - working-directory: ${{ env.RAMDISK_PATH }}
         run: |
+          echo "[INFO] Membuat FAKE HEADERS untuk PTY dan Jaringan..."
           mkdir -p fake_headers/sys
+          
           cat << 'EOF' > fake_headers/ifaddrs.h
           #ifndef FAKE_IFADDRS_H
           #define FAKE_IFADDRS_H
           struct ifaddrs {
-              struct ifaddrs  *ifa_next;
-              char            *ifa_name;
-              unsigned int     ifa_flags;
-              struct sockaddr *ifa_addr;
-              struct sockaddr *ifa_netmask;
+              struct ifaddrs  *ifa_next; char *ifa_name; unsigned int ifa_flags;
+              struct sockaddr *ifa_addr; struct sockaddr *ifa_netmask;
               union { struct sockaddr *ifu_broadaddr; struct sockaddr *ifu_dstaddr; } ifa_ifu;
-              void            *ifa_data;
+              void *ifa_data;
           };
+          #ifdef __cplusplus
+          extern "C" {
+          #endif
           static inline int getifaddrs(struct ifaddrs **ifap) { *ifap = 0; return -1; }
           static inline void freeifaddrs(struct ifaddrs *ifa) { }
+          #ifdef __cplusplus
+          }
+          #endif
           #endif
           EOF
+
           cat << 'EOF' > fake_headers/sys/uio.h
           #ifndef FAKE_SYS_UIO_H
           #define FAKE_SYS_UIO_H
@@ -70,6 +85,9 @@ jobs:
           #include <sys/types.h>
           #include <unistd.h>
           #include <errno.h>
+          #ifdef __cplusplus
+          extern "C" {
+          #endif
           static inline ssize_t preadv(int fd, const struct iovec *iov, int iovcnt, off_t offset) {
               ssize_t total = 0;
               for (int i = 0; i < iovcnt; i++) {
@@ -90,53 +108,122 @@ jobs:
               }
               return total;
           }
+          #ifdef __cplusplus
+          }
+          #endif
           #endif
           EOF
-      - working-directory: ${{ env.RAMDISK_PATH }}
-        run: |
-          mkdir -p workspace
-          cd workspace
-          cat << 'EOF' > package.json
-          {
-            "name": "gemini-cli-native-env",
-            "version": "1.0.0",
-            "description": "Prebuilt native addon container",
-            "dependencies": {}
+          
+          cat << 'EOF' > fake_headers/pty.h
+          #ifndef FAKE_PTY_H
+          #define FAKE_PTY_H
+          #include <termios.h>
+          #include <sys/ioctl.h>
+          #include <unistd.h>
+          #ifdef __cplusplus
+          extern "C" {
+          #endif
+          int openpty(int *amaster, int *aslave, char *name, const struct termios *termp, const struct winsize *winp);
+          pid_t forkpty(int *amaster, char *name, const struct termios *termp, const struct winsize *winp);
+          #ifdef __cplusplus
           }
+          #endif
+          #endif
           EOF
-      - working-directory: ${{ env.RAMDISK_PATH }}/workspace
+          
+          cat << 'EOF' > fake_headers/util.h
+          #ifndef FAKE_UTIL_H
+          #define FAKE_UTIL_H
+          #include "pty.h"
+          #endif
+          EOF
+
+      - name: BUILD MICROSOFT/NODE-PTY
+        working-directory: ${{ env.RAMDISK_PATH }}
         run: |
+          echo "[INFO] Cloning & Building microsoft/node-pty..."
+          git clone https://github.com/microsoft/node-pty.git
+          cd node-pty
+          npm install --ignore-scripts
+          
           export NDK_PATH="/opt/android-ndk"
           export TOOLCHAIN="$NDK_PATH/toolchains/llvm/prebuilt/linux-x86_64"
-          
           export CC="$TOOLCHAIN/bin/${TARGET_TRIPLE_COMPILER}${API_LEVEL}-clang"
           export CXX="$TOOLCHAIN/bin/${TARGET_TRIPLE_COMPILER}${API_LEVEL}-clang++"
           export AR="$TOOLCHAIN/bin/llvm-ar"
           export NM="$TOOLCHAIN/bin/llvm-nm"
-          export RANLIB="$TOOLCHAIN/bin/llvm-ranlib"
-          export STRIP="$TOOLCHAIN/bin/llvm-strip"
           export LINK="$CXX"
-          
           export npm_config_arch="arm"
           export npm_config_target_arch="arm"
           export npm_config_platform="android"
           export npm_config_nodedir="${{ env.RAMDISK_PATH }}/node-src"
           
           export BYPASS_FLAGS="-D_LIBCPP_HAS_NO_OFF_T_FUNCTIONS -Dfseeko=fseek -Dftello=ftell -I${{ env.RAMDISK_PATH }}/fake_headers -Wno-everything"
-          export CFLAGS="-Os -fdata-sections -ffunction-sections -fPIE $BYPASS_FLAGS"
-          export CXXFLAGS="-Os -fdata-sections -ffunction-sections -fPIE -std=c++20 $BYPASS_FLAGS"
+          export CFLAGS="-Os -fdata-sections -ffunction-sections -fPIC $BYPASS_FLAGS"
+          export CXXFLAGS="-Os -fdata-sections -ffunction-sections -fPIC -std=c++20 $BYPASS_FLAGS"
+          export LDFLAGS="-shared -fPIC -Wl,--allow-shlib-undefined -Wl,-z,undefs"
           
-          export LDFLAGS="-shared -fPIE -Wl,--allow-shlib-undefined -Wl,-z,undefs"
+          sed -i '/-lutil/d' binding.gyp
+          npx node-gyp rebuild --arch=arm --target_arch=arm --nodedir=${{ env.RAMDISK_PATH }}/node-src --verbose
           
-          npm install @lydell/node-pty --build-from-source --foreground-scripts --verbose
-      - working-directory: ${{ env.RAMDISK_PATH }}/workspace
+          if [ ! -f "build/Release/pty.node" ]; then exit 1; fi
+          /opt/android-ndk/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-strip --strip-unneeded build/Release/pty.node
+          
+          mkdir -p ${{ env.RAMDISK_PATH }}/final_package/node_modules/@lydell/node-pty
+          cp -r ./* ${{ env.RAMDISK_PATH }}/final_package/node_modules/@lydell/node-pty/
+          
+          # HACK JS LYDELL: Karena kita menyamar jadi lydell, kita arahkan requireBinary.js langsung ke C++ kita
+          echo "module.exports = require('./build/Release/pty.node');" > ${{ env.RAMDISK_PATH }}/final_package/node_modules/@lydell/node-pty/requireBinary.js
+
+      - name: BUILD @GITHUB/KEYTAR
+        working-directory: ${{ env.RAMDISK_PATH }}
         run: |
-          export STRIP="/opt/android-ndk/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-strip"
-          find node_modules -name "*.node" -exec $STRIP --strip-unneeded {} \;
+          echo "[INFO] Cloning & Building @github/keytar..."
+          git clone https://github.com/atom/node-keytar.git keytar
+          cd keytar
+          npm install --ignore-scripts
           
-          tar -czf node_modules_android6_arm.tar.gz node_modules/
+          export NDK_PATH="/opt/android-ndk"
+          export TOOLCHAIN="$NDK_PATH/toolchains/llvm/prebuilt/linux-x86_64"
+          export CC="$TOOLCHAIN/bin/${TARGET_TRIPLE_COMPILER}${API_LEVEL}-clang"
+          export CXX="$TOOLCHAIN/bin/${TARGET_TRIPLE_COMPILER}${API_LEVEL}-clang++"
+          export AR="$TOOLCHAIN/bin/llvm-ar"
+          export NM="$TOOLCHAIN/bin/llvm-nm"
+          export LINK="$CXX"
+          export npm_config_arch="arm"
+          export npm_config_target_arch="arm"
+          export npm_config_platform="android"
+          export npm_config_nodedir="${{ env.RAMDISK_PATH }}/node-src"
+          
+          # PKG_CONFIG HACK: Memaksa node-gyp melihat library ARM32 yang sudah kita curi dari Ubuntu
+          export PKG_CONFIG_LIBDIR=/usr/lib/arm-linux-gnueabihf/pkgconfig
+          export PKG_CONFIG_PATH=/usr/lib/arm-linux-gnueabihf/pkgconfig
+          
+          export BYPASS_FLAGS="-D_LIBCPP_HAS_NO_OFF_T_FUNCTIONS -I/usr/include/libsecret-1 -I/usr/include/glib-2.0 -I/usr/lib/arm-linux-gnueabihf/glib-2.0/include -Wno-everything"
+          export CFLAGS="-Os -fdata-sections -ffunction-sections -fPIC $BYPASS_FLAGS"
+          export CXXFLAGS="-Os -fdata-sections -ffunction-sections -fPIC -std=c++20 $BYPASS_FLAGS"
+          
+          # LDFLAGS SAKTI: Membiarkan simbol libsecret kosong agar tidak crash saat di-link oleh NDK
+          export LDFLAGS="-shared -fPIC -Wl,--allow-shlib-undefined -Wl,-z,undefs"
+          
+          # GYP HACK: Memaksa binding.gyp untuk mengeksekusi blok 'linux' meskipun platform kita 'android'
+          sed -i 's/OS=="linux"/OS=="android" or OS=="linux"/g' binding.gyp
+          
+          npx node-gyp rebuild --arch=arm --target_arch=arm --nodedir=${{ env.RAMDISK_PATH }}/node-src --verbose
+          
+          if [ ! -f "build/Release/keytar.node" ]; then exit 1; fi
+          /opt/android-ndk/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-strip --strip-unneeded build/Release/keytar.node
+          
+          mkdir -p ${{ env.RAMDISK_PATH }}/final_package/node_modules/@github/keytar
+          cp -r ./* ${{ env.RAMDISK_PATH }}/final_package/node_modules/@github/keytar/
+
+      - name: Package Final Native Addons
+        working-directory: ${{ env.RAMDISK_PATH }}/final_package
+        run: |
+          tar -czf prebuilt_gemini_addons_arm32.tar.gz node_modules/
+
       - uses: actions/upload-artifact@v4
         with:
-          name: prebuilt-node-pty-android6-arm
-          path: ${{ env.RAMDISK_PATH }}/workspace/node_modules_android6_arm.tar.gz
+          name: prebuilt-gemini-addons-android6
+          path: ${{ env.RAMDISK_PATH }}/final_package/prebuilt_gemini_addons_arm32.tar.gz
           retention-days: 7
