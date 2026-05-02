@@ -1,4 +1,4 @@
-name: Build Prebuilt @lydell/node-pty (NDK API 23 ARM32)
+name: Build Prebuilt microsoft/node-pty (NDK API 23 ARM32)
 on:
   workflow_dispatch:
 jobs:
@@ -142,8 +142,8 @@ jobs:
 
       - working-directory: ${{ env.RAMDISK_PATH }}
         run: |
-          echo "[INFO] Melakukan Clone Source Code @lydell/node-pty..."
-          git clone https://github.com/lydell/node-pty.git
+          echo "[INFO] Melakukan Clone Source Code microsoft/node-pty..."
+          git clone https://github.com/microsoft/node-pty.git
           cd node-pty
           
           echo "[INFO] Menginstal dependensi JS (nan, node-addon-api) TANPA memicu build script bawaan..."
@@ -188,16 +188,16 @@ jobs:
           $STRIP --strip-unneeded build/Release/pty.node
           
           echo "[INFO] Mengemas ke dalam struktur node_modules..."
-          mkdir -p ${{ env.RAMDISK_PATH }}/final_package/node_modules/@lydell/node-pty
+          mkdir -p ${{ env.RAMDISK_PATH }}/final_package/node_modules/node-pty
           
           # Menyalin seluruh source code, package.json, dan folder build yang berisi .node
-          cp -r ./* ${{ env.RAMDISK_PATH }}/final_package/node_modules/@lydell/node-pty/
+          cp -r ./* ${{ env.RAMDISK_PATH }}/final_package/node_modules/node-pty/
           
           cd ${{ env.RAMDISK_PATH }}/final_package
-          tar -czf prebuilt_node_pty_arm32.tar.gz node_modules/
+          tar -czf prebuilt_microsoft_node_pty_arm32.tar.gz node_modules/
 
       - uses: actions/upload-artifact@v4
         with:
-          name: prebuilt-lydell-node-pty-android6
-          path: ${{ env.RAMDISK_PATH }}/final_package/prebuilt_node_pty_arm32.tar.gz
+          name: prebuilt-microsoft-node-pty-android6
+          path: ${{ env.RAMDISK_PATH }}/final_package/prebuilt_microsoft_node_pty_arm32.tar.gz
           retention-days: 7
