@@ -22,9 +22,25 @@ jobs:
 
       - name: Install NDK & The Libsecret Heist Dependencies
         run: |
-          # Menambahkan arsitektur ARM32 ke Ubuntu Host untuk mencuri Header libsecret & glib
           sudo dpkg --add-architecture armhf
+          
+          # ====================================================================
+          # HACK APT: Memaksa Ubuntu mencari ARM32 di server "ports"
+          # ====================================================================
+          # 1. Batasi repo bawaan agar HANYA mencari amd64 (mencegah error 404)
+          sudo sed -i 's/deb http/deb [arch=amd64] http/g' /etc/apt/sources.list
+          sudo sed -i 's/deb https/deb [arch=amd64] https/g' /etc/apt/sources.list
+          
+          # 2. Tambahkan repo khusus ARM32 yang mengarah ke ports.ubuntu.com
+          cat << 'EOF' | sudo tee /etc/apt/sources.list.d/arm-cross.list
+          deb [arch=armhf] http://ports.ubuntu.com/ubuntu-ports/ jammy main universe restricted multiverse
+          deb [arch=armhf] http://ports.ubuntu.com/ubuntu-ports/ jammy-updates main universe restricted multiverse
+          deb [arch=armhf] http://ports.ubuntu.com/ubuntu-ports/ jammy-security main universe restricted multiverse
+          EOF
+          
           sudo apt-get update
+          
+          # 3. Instal dependensi lintas arsitektur
           sudo DEBIAN_FRONTEND=noninteractive apt-get install -y python3 make cmake git curl wget xz-utils binutils gcc g++ pkg-config unzip \
             libsecret-1-dev:armhf libglib2.0-dev:armhf
           
@@ -172,7 +188,6 @@ jobs:
           mkdir -p ${{ env.RAMDISK_PATH }}/final_package/node_modules/@lydell/node-pty
           cp -r ./* ${{ env.RAMDISK_PATH }}/final_package/node_modules/@lydell/node-pty/
           
-          # HACK JS LYDELL: Karena kita menyamar jadi lydell, kita arahkan requireBinary.js langsung ke C++ kita
           echo "module.exports = require('./build/Release/pty.node');" > ${{ env.RAMDISK_PATH }}/final_package/node_modules/@lydell/node-pty/requireBinary.js
 
       - name: BUILD @GITHUB/KEYTAR
@@ -195,7 +210,6 @@ jobs:
           export npm_config_platform="android"
           export npm_config_nodedir="${{ env.RAMDISK_PATH }}/node-src"
           
-          # PKG_CONFIG HACK: Memaksa node-gyp melihat library ARM32 yang sudah kita curi dari Ubuntu
           export PKG_CONFIG_LIBDIR=/usr/lib/arm-linux-gnueabihf/pkgconfig
           export PKG_CONFIG_PATH=/usr/lib/arm-linux-gnueabihf/pkgconfig
           
@@ -203,10 +217,8 @@ jobs:
           export CFLAGS="-Os -fdata-sections -ffunction-sections -fPIC $BYPASS_FLAGS"
           export CXXFLAGS="-Os -fdata-sections -ffunction-sections -fPIC -std=c++20 $BYPASS_FLAGS"
           
-          # LDFLAGS SAKTI: Membiarkan simbol libsecret kosong agar tidak crash saat di-link oleh NDK
           export LDFLAGS="-shared -fPIC -Wl,--allow-shlib-undefined -Wl,-z,undefs"
           
-          # GYP HACK: Memaksa binding.gyp untuk mengeksekusi blok 'linux' meskipun platform kita 'android'
           sed -i 's/OS=="linux"/OS=="android" or OS=="linux"/g' binding.gyp
           
           npx node-gyp rebuild --arch=arm --target_arch=arm --nodedir=${{ env.RAMDISK_PATH }}/node-src --verbose
